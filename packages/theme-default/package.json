@@ -2,6 +2,26 @@
   "name": "@ezygrid/theme-default",
   "version": "0.1.0",
   "description": "Default light theme for Ezygrid (CSS variables only)",
+  "license": "MIT",
+  "author": {
+    "name": "Bookklik Technologies",
+    "url": "https://github.com/bookklik-technologies"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bookklik-technologies/ezygrid.git",
+    "directory": "packages/theme-default"
+  },
+  "homepage": "https://github.com/bookklik-technologies/ezygrid#readme",
+  "bugs": {
+    "url": "https://github.com/bookklik-technologies/ezygrid/issues"
+  },
+  "keywords": [
+    "spreadsheet",
+    "theme",
+    "css-variables",
+    "ezygrid"
+  ],
   "type": "module",
   "main": "./index.css",
   "exports": {

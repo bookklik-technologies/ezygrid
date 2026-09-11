@@ -2,6 +2,27 @@
   "name": "@ezygrid/theme-dark",
   "version": "0.1.0",
   "description": "Dark theme for Ezygrid (CSS variables only)",
+  "license": "MIT",
+  "author": {
+    "name": "Bookklik Technologies",
+    "url": "https://github.com/bookklik-technologies"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bookklik-technologies/ezygrid.git",
+    "directory": "packages/theme-dark"
+  },
+  "homepage": "https://github.com/bookklik-technologies/ezygrid#readme",
+  "bugs": {
+    "url": "https://github.com/bookklik-technologies/ezygrid/issues"
+  },
+  "keywords": [
+    "spreadsheet",
+    "theme",
+    "dark-mode",
+    "css-variables",
+    "ezygrid"
+  ],
   "type": "module",
   "main": "./index.css",
   "exports": {

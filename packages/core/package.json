@@ -1,6 +1,27 @@
 {
   "name": "@ezygrid/core",
   "version": "0.1.0",
+  "description": "Workbook/worksheet facade, rendering, selection, editing, and history engine for Ezygrid.",
+  "license": "MIT",
+  "author": {
+    "name": "Bookklik Technologies",
+    "url": "https://github.com/bookklik-technologies"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bookklik-technologies/ezygrid.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/bookklik-technologies/ezygrid#readme",
+  "bugs": {
+    "url": "https://github.com/bookklik-technologies/ezygrid/issues"
+  },
+  "keywords": [
+    "spreadsheet",
+    "datagrid",
+    "grid",
+    "ezygrid"
+  ],
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

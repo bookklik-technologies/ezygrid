@@ -2,6 +2,30 @@
   "name": "ezygrid",
   "private": true,
   "version": "0.1.0",
+  "description": "Framework-agnostic JavaScript/TypeScript spreadsheet and data-grid library.",
+  "keywords": [
+    "spreadsheet",
+    "datagrid",
+    "data-grid",
+    "grid",
+    "table",
+    "excel",
+    "formulas",
+    "typescript"
+  ],
+  "license": "MIT",
+  "author": {
+    "name": "Bookklik Technologies",
+    "url": "https://github.com/bookklik-technologies"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bookklik-technologies/ezygrid.git"
+  },
+  "homepage": "https://github.com/bookklik-technologies/ezygrid#readme",
+  "bugs": {
+    "url": "https://github.com/bookklik-technologies/ezygrid/issues"
+  },
   "packageManager": "pnpm@11.24.0",
   "engines": {
     "node": ">=20"
