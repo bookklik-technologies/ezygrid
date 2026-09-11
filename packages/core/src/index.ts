@@ -20,3 +20,4 @@ export * from './media.js';
 export * from './print.js';
 export * from './plugins.js';
 export * from './theme.js';
+export * from './ezy-grid.js';

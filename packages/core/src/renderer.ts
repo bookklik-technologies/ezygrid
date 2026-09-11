@@ -1,15 +1,15 @@
 import type { Workbook, Worksheet } from './workbook.js';
 import { SelectionService } from './selection.js';
-import { EditService } from './editing.js';
+import { EditService, parseEditorValue } from './editing.js';
 import { ClipboardService } from './clipboard.js';
 import { CommandRegistry, createDefaultCommands, type CommandContext } from './commands.js';
-import { FillService, type FillDirection } from './fill.js';
+import { FillService } from './fill.js';
 import { translateFormula } from './clipboard.js';
 import { formatValue } from './format.js';
 import { renderChartSVG } from './chart-svg.js';
 import { readChartData } from './charts.js';
 import { formulaRegistry, type FunctionMeta } from '@ezygrid/formula';
-import { parseRange, toA1, type Rect } from '@ezygrid/model';
+import { parseRange, rectContains, toA1, type Rect } from '@ezygrid/model';
 import type { CellStyle } from './workbook.js';
 import { DEFAULT_COLUMN_WIDTH, DEFAULT_ROW_HEIGHT } from './workbook.js';
 
@@ -78,6 +78,8 @@ export class GridRenderer {
   private cellPool: HTMLElement[] = [];
   private activeCells = new Map<string, HTMLElement>();
   private unlistenOperations: (() => void) | null = null;
+  private unlistenSelection: (() => void) | null = null;
+  private selectionVisible = true;
   private scrollRow = 0;
   private scrollCol = 0;
   private destroyed = false;
@@ -98,37 +100,42 @@ export class GridRenderer {
     };
     this.selection = new SelectionService(this.worksheet.rowCount, this.worksheet.columnCount);
     this.editing = new EditService();
-    this.registerDefaultCommands();
-    this.build();
-    this.bind();
-    this.render();
-    // Model changes drive rendering: edits, structural operations and
-    // undo/redo replay refresh the visible projection automatically.
-    this.unlistenOperations = workbook.onOperation((operation) => {
-      if (this.destroyed) return;
-      switch (operation.type) {
-        case 'cell.set':
-        case 'rows.insert':
-        case 'rows.delete':
-        case 'columns.insert':
-        case 'columns.delete':
-          if (operation.worksheetId !== this.worksheet.id) return;
-          break;
-        case 'undo':
-        case 'redo':
-          break;
-        default:
-          return;
-      }
+    try {
+      this.registerDefaultCommands();
+      this.build();
+      this.bind();
       this.render();
-    });
-    // Plugins run once the public surfaces (commands, renderer) exist (§44).
-    this.workbook.pluginManager.run({
-      workbook: this.workbook,
-      worksheet: this.worksheet,
-      commands: this.commands,
-      renderer: this,
-    });
+      // Model changes drive rendering: edits, structural operations and
+      // undo/redo replay refresh the visible projection automatically.
+      this.unlistenOperations = workbook.onOperation((operation) => {
+        if (this.destroyed) return;
+        switch (operation.type) {
+          case 'cell.set':
+          case 'rows.insert':
+          case 'rows.delete':
+          case 'columns.insert':
+          case 'columns.delete':
+            if (operation.worksheetId !== this.worksheet.id) return;
+            break;
+          case 'undo':
+          case 'redo':
+            break;
+          default:
+            return;
+        }
+        this.render();
+      });
+      // Plugins run once the public surfaces (commands, renderer) exist (§44).
+      this.workbook.pluginManager.run({
+        workbook: this.workbook,
+        worksheet: this.worksheet,
+        commands: this.commands,
+        renderer: this,
+      });
+    } catch (error) {
+      this.destroy();
+      throw error;
+    }
   }
 
   private get topInset(): number {
@@ -141,6 +148,7 @@ export class GridRenderer {
   private formulaBarEl: HTMLElement | null = null;
   private nameBox: HTMLInputElement | null = null;
   private formulaInput: HTMLInputElement | null = null;
+  private formulaBarEdit: { row: number; column: number; initial: string } | null = null;
   private contextMenuEl: HTMLElement | null = null;
   private zoom = 1;
   /** Pagination view state (§22). */
@@ -252,6 +260,8 @@ export class GridRenderer {
 
     this.cellLayer = doc.createElement('div');
     this.cellLayer.className = 'ezygrid-cells';
+    // Children use content coordinates; the native scroller moves them once.
+    Object.assign(this.cellLayer.style, { position: 'absolute', left: '0', top: '0' });
     this.scrollEl.appendChild(this.cellLayer);
 
     this.mediaLayer = doc.createElement('div');
@@ -309,7 +319,7 @@ export class GridRenderer {
 
     this.fillHandle = doc.createElement('div');
     this.fillHandle.className = 'ezygrid-fillhandle';
-    this.fillHandle.title = 'Drag to fill cells. Press Escape to cancel.';
+    this.fillHandle.title = 'Drag to select cells. Alt+drag to autofill. Press Escape to cancel.';
     Object.assign(this.fillHandle.style, {
       position: 'absolute',
       width: '8px',
@@ -413,21 +423,31 @@ export class GridRenderer {
         boxSizing: 'border-box',
         font: 'inherit',
       } as CSSStyleDeclaration);
+      this.formulaInput.addEventListener('focus', () => {
+        this.commitEditor();
+        this.updateFormulaBar();
+        this.beginFormulaBarEdit();
+      });
+      this.formulaInput.addEventListener('input', () => this.beginFormulaBarEdit());
+      this.formulaInput.addEventListener('blur', () => this.commitFormulaBarEdit());
       this.formulaInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
+        e.stopPropagation();
+        if (e.isComposing || e.keyCode === 229) return;
+        if (e.key === 'Enter' || e.key === 'Tab') {
           e.preventDefault();
-          const { row, column } = this.selection.state.active;
-          this.worksheet.setValue(row, column, this.formulaInput!.value);
-          this.formulaInput!.blur();
+          this.commitFormulaBarEdit(true);
+          if (e.key === 'Tab') {
+            this.selection.move(e.shiftKey ? 'left' : 'right', false, false, this.isFilled);
+            this.ensureActiveVisible();
+          }
           this.root.focus({ preventScroll: true });
           this.render();
         } else if (e.key === 'Escape') {
           e.preventDefault();
+          this.formulaBarEdit = null;
           this.updateFormulaBar();
-          this.formulaInput!.blur();
           this.root.focus({ preventScroll: true });
         }
-        e.stopPropagation();
       });
       bar.append(this.nameBox, this.formulaInput);
       this.formulaBarEl = bar;
@@ -502,6 +522,16 @@ export class GridRenderer {
   }
 
   private bind(): void {
+    this.unlistenSelection = this.selection.onChange(() => {
+      const active = this.selection.state.active;
+      if (this.formulaBarEdit && (this.formulaBarEdit.row !== active.row || this.formulaBarEdit.column !== active.column)) {
+        this.commitFormulaBarEdit();
+      }
+      if (this.fillDragging) this.cancelFillDrag();
+      this.renderSelection();
+    });
+    this.container.addEventListener('focusin', this.onFocusIn);
+    this.container.addEventListener('focusout', this.onFocusOut);
     this.scrollEl.addEventListener('scroll', this.onScroll);
     this.cellLayer.addEventListener('mousedown', this.onMouseDown);
     this.cellLayer.addEventListener('dblclick', this.onDoubleClick);
@@ -514,6 +544,18 @@ export class GridRenderer {
     }
   }
 
+  private onFocusIn = (): void => {
+    this.selectionVisible = true;
+    this.renderSelection();
+  };
+
+  private onFocusOut = (event: FocusEvent): void => {
+    if (event.relatedTarget instanceof Node && this.container.contains(event.relatedTarget)) return;
+    this.selectionVisible = false;
+    this.cancelFillDrag();
+    this.renderSelection();
+  };
+
   private onFillHandleDown = (event: MouseEvent): void => {
     if (event.button !== 0) return;
     event.preventDefault();
@@ -521,6 +563,7 @@ export class GridRenderer {
     this.commitEditor();
     this.root.focus({ preventScroll: true });
     this.fillDragging = true;
+    this.autofillDragging = event.altKey;
     this.fillSource = { ...this.selection.primary };
     this.fillTarget = null;
     this.fillPointer = { x: event.clientX, y: event.clientY };
@@ -538,7 +581,7 @@ export class GridRenderer {
     const cell = (event.target as HTMLElement).closest?.('.ezygrid-cell');
     this.fillPointer = { x: event.clientX, y: event.clientY };
     this.fillTarget = null;
-    if (cell instanceof HTMLElement && this.cellLayer.contains(cell)) {
+    if (cell instanceof HTMLElement && this.root.contains(cell)) {
       const { row, col } = cell.dataset;
       if (row !== undefined && col !== undefined) {
         this.fillTarget = { row: Number(row), column: Number(col) };
@@ -557,12 +600,13 @@ export class GridRenderer {
 
   private cancelFillDrag = (): void => {
     this.fillDragging = false;
+    this.autofillDragging = false;
     this.fillSource = null;
     this.fillTarget = null;
     this.fillPointer = null;
-    this.fillPreview.style.display = 'none';
-    this.fillRangeLabel.style.display = 'none';
-    this.root.style.cursor = '';
+    if (this.fillPreview) this.fillPreview.style.display = 'none';
+    if (this.fillRangeLabel) this.fillRangeLabel.style.display = 'none';
+    if (this.root) this.root.style.cursor = '';
     const doc = this.container.ownerDocument;
     doc.removeEventListener('mousemove', this.onFillDragMove);
     doc.removeEventListener('mouseup', this.onFillDragEnd);
@@ -650,14 +694,21 @@ export class GridRenderer {
 
   private onFillDragEnd = (event: MouseEvent): void => {
     if (!this.fillDragging || event.button !== 0) return;
-    this.onFillDragMove(event);
+    // A release on the host can follow the last valid cell move. Preserve that
+    // endpoint, but cancel when the release occurs outside this editor.
+    const cell = (event.target as HTMLElement).closest?.('.ezygrid-cell');
+    if (cell) this.onFillDragMove(event);
+    else if (!(event.target instanceof Node) || !this.container.contains(event.target)) this.fillTarget = null;
     const source = this.fillSource;
     const plan = this.getFillPlan();
+    const autofill = this.autofillDragging;
     this.cancelFillDrag();
     if (!source || !plan) return;
-    this.fill.fill(this.worksheet, plan.direction, source, plan.end);
-    this.selection.setActive(plan.range.top, plan.range.left);
-    this.selection.extendTo(plan.range.bottom, plan.range.right);
+    // Expanding a selection must never write cell data. Only an explicit
+    // Alt+drag requests autofill (which may overwrite destination values).
+    if (autofill) this.fill.fillRange(this.worksheet, source, plan);
+    this.selection.setActive(plan.top, plan.left);
+    this.selection.extendTo(plan.bottom, plan.right);
     this.render();
   };
 
@@ -707,7 +758,6 @@ export class GridRenderer {
     } else {
       this.selection.setActive(r, c);
     }
-    this.renderSelection();
     this.root.focus({ preventScroll: true });
   };
 
@@ -786,8 +836,7 @@ export class GridRenderer {
     }
     if (event.key === 'Delete' || event.key === 'Backspace') {
       event.preventDefault();
-      const { active } = this.selection.state;
-      this.worksheet.setValue(active.row, active.column, null);
+      this.clearSelectedContents();
       this.render();
       return;
     }
@@ -817,37 +866,33 @@ export class GridRenderer {
   readonly commands = new CommandRegistry();
   private fill = new FillService();
   private fillDragging = false;
+  private autofillDragging = false;
   private fillSource: Rect | null = null;
   private fillTarget: { row: number; column: number } | null = null;
   private fillPointer: { x: number; y: number } | null = null;
 
   /** Share one destination calculation between the preview and the actual fill. */
-  private getFillPlan(): { direction: FillDirection; end: number; range: Rect } | null {
+  private getFillPlan(): Rect | null {
     const source = this.fillSource;
     const target = this.fillTarget;
     if (!source || !target) return null;
-    if (target.row > source.bottom) {
-      return { direction: 'down', end: target.row, range: { ...source, bottom: target.row } };
-    }
-    if (target.column > source.right) {
-      return { direction: 'right', end: target.column, range: { ...source, right: target.column } };
-    }
-    if (target.row < source.top) {
-      return { direction: 'up', end: target.row, range: { ...source, top: target.row } };
-    }
-    if (target.column < source.left) {
-      return { direction: 'left', end: target.column, range: { ...source, left: target.column } };
-    }
-    return null;
+    if (target.row >= source.top && target.row <= source.bottom &&
+        target.column >= source.left && target.column <= source.right) return null;
+    return {
+      top: Math.min(source.top, target.row),
+      bottom: Math.max(source.bottom, target.row),
+      left: Math.min(source.left, target.column),
+      right: Math.max(source.right, target.column),
+    };
   }
 
   private renderFillPreview(): void {
     if (!this.fillDragging || !this.fillSource || !this.fillPointer) return;
-    const range = this.getFillPlan()?.range ?? this.fillSource;
+    const range = this.getFillPlan() ?? this.fillSource;
     Object.assign(this.fillPreview.style, {
       display: 'block',
-      left: `${this.zOffsetX(range.left) - this.scrollLeft()}px`,
-      top: `${this.zOffsetY(range.top) - this.scrollTop()}px`,
+      left: `${this.zOffsetX(range.left)}px`,
+      top: `${this.zOffsetY(range.top)}px`,
       width: `${this.zOffsetX(range.right + 1) - this.zOffsetX(range.left)}px`,
       height: `${this.zOffsetY(range.bottom + 1) - this.zOffsetY(range.top)}px`,
     });
@@ -866,6 +911,22 @@ export class GridRenderer {
     ));
     this.fillRangeLabel.style.left = `${left}px`;
     this.fillRangeLabel.style.top = `${top}px`;
+  }
+
+  private clearSelectedContents(): void {
+    const ranges = this.selection.state.ranges.map((range) => ({ ...range }));
+    const cells: { row: number; column: number }[] = [];
+    // Visit stored content only, so whole-row/column selections stay sparse.
+    // Snapshot before writes: clearing formulas can update the cell store.
+    this.worksheet.cells.forEach((row, column, record) => {
+      if ((record.formula !== undefined || record.raw != null) &&
+          ranges.some((range) => rectContains(range, row, column))) {
+        cells.push({ row, column });
+      }
+    });
+    for (const { row, column } of cells) {
+      this.worksheet.setValue(row, column, null);
+    }
   }
 
   private commandContext(): CommandContext {
@@ -1231,8 +1292,8 @@ export class GridRenderer {
   }
 
   private positionEditor(input: HTMLElement, row: number, column: number): void {
-    input.style.left = `${this.zOffsetX(column) - this.scrollLeft()}px`;
-    input.style.top = `${this.zOffsetY(row) - this.scrollTop()}px`;
+    input.style.left = `${this.zOffsetX(column)}px`;
+    input.style.top = `${this.zOffsetY(row)}px`;
     input.style.width = `${this.zSizeX(column)}px`;
     input.style.height = `${this.zSizeY(row)}px`;
   }
@@ -1254,10 +1315,10 @@ export class GridRenderer {
     const cellBottom = cellTop + this.zSizeY(row);
     const cellLeft = this.zOffsetX(column);
     const cellRight = cellLeft + this.zSizeX(column);
-    if (cellTop < top) this.scrollEl.scrollTop = cellTop / this.zoom;
-    else if (cellBottom > top + height) this.scrollEl.scrollTop = (cellBottom - height) / this.zoom;
-    if (cellLeft < left) this.scrollEl.scrollLeft = cellLeft / this.zoom;
-    else if (cellRight > left + width) this.scrollEl.scrollLeft = (cellRight - width) / this.zoom;
+    if (cellTop < top) this.scrollEl.scrollTop = cellTop;
+    else if (cellBottom > top + height) this.scrollEl.scrollTop = cellBottom - height;
+    if (cellLeft < left) this.scrollEl.scrollLeft = cellLeft;
+    else if (cellRight > left + width) this.scrollEl.scrollLeft = cellRight - width;
   }
 
   private scrollLeft(): number {
@@ -1355,7 +1416,6 @@ export class GridRenderer {
     this.applyCellStyle(cell, row, column);
     cell.setAttribute('role', 'gridcell');
     cell.setAttribute('aria-colindex', String(column + 1));
-    cell.setAttribute('aria-selected', this.selection.isWithin(row, column) ? 'true' : 'false');
   }
 
   private applyCellStyle(cell: HTMLElement, row: number, column: number): void {
@@ -1367,11 +1427,7 @@ export class GridRenderer {
     cell.style.textDecoration = merged.underline ? 'underline' : '';
     cell.style.color = merged.color ?? '';
     cell.style.textAlign = merged.align ?? '';
-    if (this.selection.isWithin(row, column)) {
-      cell.style.background = 'var(--ezygrid-selection-soft, rgba(37,99,235,0.08))';
-    } else {
-      cell.style.background = merged.background ?? '';
-    }
+    cell.style.background = merged.background ?? '';
     // Structured table banding (§25).
     const table = this.worksheet.tables.at(row, column);
     if (table && row > table.range.top) {
@@ -1383,6 +1439,12 @@ export class GridRenderer {
         cell.style.background = 'var(--ezygrid-table-band, rgba(0,0,0,0.03))';
       }
     }
+    // Selection is transient and takes precedence over table banding. Restore
+    // the actual cell background on the next selection/focus change.
+    if (this.selectionVisible && this.selection.isWithin(row, column)) {
+      cell.style.background = 'var(--ezygrid-selection-soft, rgba(37,99,235,0.08))';
+    }
+    cell.setAttribute('aria-selected', this.selection.isWithin(row, column) ? 'true' : 'false');
     const note = this.worksheet.getNote(row, column);
     cell.title = note ?? '';
     cell.dataset.note = note !== undefined ? 'true' : '';
@@ -1440,11 +1502,9 @@ export class GridRenderer {
 
   private visibleRowEnd(): number {
     const ws = this.worksheet;
-    const top = this.scrollTop() / this.zoom;
-    const height = this.viewportHeight() / this.zoom;
     const start = this.visibleRowStart();
     let end = start;
-    let bottom = top + height;
+    const bottom = this.scrollTop() + this.viewportHeight();
     while (end < ws.rowCount && this.zOffsetY(end) < bottom) end += 1;
     end = Math.min(ws.rowCount, end + this.options.overscanRows);
     if (this.pagination) {
@@ -1457,11 +1517,9 @@ export class GridRenderer {
 
   private visibleColumnEnd(): number {
     const ws = this.worksheet;
-    const left = this.scrollLeft() / this.zoom;
-    const width = this.viewportWidth() / this.zoom;
     const start = this.zIndexColumn(this.scrollLeft());
     let end = start;
-    let right = left + width;
+    const right = this.scrollLeft() + this.viewportWidth();
     while (end < ws.columnCount && this.zOffsetX(end) < right) end += 1;
     return Math.min(ws.columnCount, end + this.options.overscanColumns);
   }
@@ -1563,11 +1621,22 @@ export class GridRenderer {
     }
   }
 
-  private renderSelection(): void {
+  private renderSelection(refreshStyles = true): void {
+    if (this.destroyed) return;
+    if (refreshStyles) {
+      for (const cell of this.activeCells.values()) {
+        this.applyCellStyle(cell, Number(cell.dataset.row), Number(cell.dataset.col));
+      }
+      for (const layer of [this.frozenTopEl, this.frozenLeftEl]) {
+        for (const cell of Array.from(layer.children) as HTMLElement[]) {
+          this.applyCellStyle(cell, Number(cell.dataset.row), Number(cell.dataset.col));
+        }
+      }
+    }
     const ws = this.worksheet;
     const primary = this.selection.primary;
-    const top = this.zOffsetY(primary.top) - this.scrollTop();
-    const left = this.zOffsetX(primary.left) - this.scrollLeft();
+    const top = this.zOffsetY(primary.top);
+    const left = this.zOffsetX(primary.left);
     const height =
       (ws.rowSizes.offsetOf(primary.bottom) + ws.rowSizes.sizeOf(primary.bottom) -
         ws.rowSizes.offsetOf(primary.top)) * this.zoom;
@@ -1575,7 +1644,7 @@ export class GridRenderer {
       (ws.columnSizes.offsetOf(primary.right) + ws.columnSizes.sizeOf(primary.right) -
         ws.columnSizes.offsetOf(primary.left)) * this.zoom;
     Object.assign(this.selectionOverlay.style, {
-      display: 'block',
+      display: this.selectionVisible ? 'block' : 'none',
       left: `${left}px`,
       top: `${top}px`,
       width: `${width}px`,
@@ -1583,7 +1652,7 @@ export class GridRenderer {
     } as CSSStyleDeclaration);
     if (this.fillHandle) {
       Object.assign(this.fillHandle.style, {
-        display: 'block',
+        display: this.selectionVisible ? 'block' : 'none',
         left: `${left + width - 4}px`,
         top: `${top + height - 4}px`,
       } as CSSStyleDeclaration);
@@ -1592,17 +1661,44 @@ export class GridRenderer {
     this.renderFillPreview();
   }
 
-  private updateFormulaBar(): void {
-    if (!this.formulaInput || !this.nameBox) return;
-    const { row, column } = this.selection.state.active;
-    this.nameBox.value = this.selection.describe();
+  private formulaBarText(row: number, column: number): string {
     const record = this.worksheet.cells.getCell(row, column);
-    this.formulaInput.value =
+    return (
       record?.formula !== undefined
         ? record.formula
         : record?.raw === null || record?.raw === undefined
           ? ''
-          : String(record.raw);
+          : String(record.raw)
+    );
+  }
+
+  private beginFormulaBarEdit(): void {
+    if (this.formulaBarEdit || this.destroyed) return;
+    const { row, column } = this.selection.state.active;
+    this.formulaBarEdit = { row, column, initial: this.formulaBarText(row, column) };
+  }
+
+  private commitFormulaBarEdit(force = false): void {
+    if (!this.formulaInput || this.destroyed) return;
+    if (force) this.beginFormulaBarEdit();
+    const draft = this.formulaBarEdit;
+    if (!draft) return;
+    const text = this.formulaInput.value;
+    // Clear before setValue: its operation notification can repaint immediately.
+    this.formulaBarEdit = null;
+    if (text !== draft.initial) {
+      this.worksheet.setValue(draft.row, draft.column, text.startsWith('=') ? text : parseEditorValue(text));
+    }
+    this.updateFormulaBar();
+  }
+
+  private updateFormulaBar(): void {
+    if (!this.formulaInput || !this.nameBox) return;
+    this.nameBox.value = this.selection.describe();
+    // Scrolling, focus changes, and unrelated model updates must not erase a draft.
+    if (this.formulaBarEdit) return;
+    const { row, column } = this.selection.state.active;
+    this.formulaInput.value = this.formulaBarText(row, column);
   }
 
   /** Re-render the visible projection. Recycles cell elements between frames. */
@@ -1612,6 +1708,10 @@ export class GridRenderer {
 
     this.spacerEl.style.width = `${ws.columnSizes.totalSize() * this.zoom}px`;
     this.spacerEl.style.height = `${ws.rowSizes.totalSize() * this.zoom}px`;
+
+    // Zoom and programmatic navigation can render before a native scroll event.
+    this.scrollRow = this.visibleRowStart();
+    this.scrollCol = this.zIndexColumn(this.scrollLeft());
 
     // recycle: release cells that scrolled out or became merge-covered
     for (const [key, el] of this.activeCells) {
@@ -1634,8 +1734,6 @@ export class GridRenderer {
 
     const rowEnd = this.visibleRowEnd();
     const colEnd = this.visibleColumnEnd();
-    const startX = this.scrollLeft();
-    const startY = this.scrollTop();
     for (let r = this.visibleRowStart(); r < rowEnd; r++) {
       if (ws.isRowHidden(r)) continue;
       for (let c = this.scrollCol; c < colEnd; c++) {
@@ -1643,8 +1741,8 @@ export class GridRenderer {
         const key = `${r},${c}`;
         const merge = ws.merges.findAt(r, c);
         if (merge && !(merge.top === r && merge.left === c)) continue;
-        const offsetX = this.zOffsetX(c) - startX;
-        const offsetY = this.zOffsetY(r) - startY;
+        const offsetX = this.zOffsetX(c);
+        const offsetY = this.zOffsetY(r);
         const span = merge
           ? {
               width:
@@ -1667,7 +1765,7 @@ export class GridRenderer {
     }
     this.renderHeaders();
     this.renderFrozen();
-    this.renderSelection();
+    this.renderSelection(false);
     this.renderMedia();
   }
 
@@ -1729,8 +1827,8 @@ export class GridRenderer {
   }
 
   private positionFloating(el: HTMLElement, anchor: { row: number; column: number }, offsetX?: number, offsetY?: number): void {
-    const left = this.zOffsetX(anchor.column) - this.scrollLeft() + (offsetX ?? 0);
-    const top = this.zOffsetY(anchor.row) - this.scrollTop() + (offsetY ?? 0);
+    const left = this.zOffsetX(anchor.column) + (offsetX ?? 0);
+    const top = this.zOffsetY(anchor.row) + (offsetY ?? 0);
     el.style.left = `${left}px`;
     el.style.top = `${top}px`;
   }
@@ -1748,24 +1846,30 @@ export class GridRenderer {
   }
 
   destroy(): void {
+    if (this.destroyed) return;
     this.destroyed = true;
+    this.formulaBarEdit = null;
     this.cancelFillDrag();
     this.unlistenOperations?.();
     this.unlistenOperations = null;
-    this.scrollEl.removeEventListener('scroll', this.onScroll);
-    this.cellLayer.removeEventListener('mousedown', this.onMouseDown);
-    this.cellLayer.removeEventListener('dblclick', this.onDoubleClick);
-    this.cellLayer.removeEventListener('contextmenu', this.onContextMenu);
-    this.root.removeEventListener('keydown', this.onKeyDown);
-    this.root.removeEventListener('copy', this.onCopy);
-    this.root.removeEventListener('cut', this.onCut);
-    this.root.removeEventListener('paste', this.onPaste);
+    this.unlistenSelection?.();
+    this.unlistenSelection = null;
+    this.container.removeEventListener('focusin', this.onFocusIn);
+    this.container.removeEventListener('focusout', this.onFocusOut);
+    this.scrollEl?.removeEventListener('scroll', this.onScroll);
+    this.cellLayer?.removeEventListener('mousedown', this.onMouseDown);
+    this.cellLayer?.removeEventListener('dblclick', this.onDoubleClick);
+    this.cellLayer?.removeEventListener('contextmenu', this.onContextMenu);
+    this.root?.removeEventListener('keydown', this.onKeyDown);
+    this.root?.removeEventListener('copy', this.onCopy);
+    this.root?.removeEventListener('cut', this.onCut);
+    this.root?.removeEventListener('paste', this.onPaste);
     this.container.ownerDocument.removeEventListener('mousedown', this.onGlobalMouseDown);
     this.fillHandle?.removeEventListener('mousedown', this.onFillHandleDown);
     this.editing.cancel();
     this.unmountEditor();
     this.contextMenuEl?.remove();
-    this.root.remove();
+    this.root?.remove();
   }
 }
 

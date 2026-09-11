@@ -1,20 +1,106 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<title>Ezygrid — basic</title>
-<style>
-  body { font-family: system-ui, sans-serif; margin: 24px auto; max-width: 960px; }
-  h1 { font-size: 20px; }
-  #grid { height: 460px; border: 1px solid #e4e4e7; }
-  #status { color: #52525b; font-size: 13px; margin-top: 12px; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Formulas | Ezygrid examples</title>
+  <link rel="stylesheet" href="./examples.css">
+  <script src="./demo.js"></script>
+
 </head>
 <body>
-<h1>Ezygrid — basic workbook</h1>
-<p>Two sheets, cross-sheet formulas, styles and number formats. Click cells, use arrow keys, edit with F2 or by typing, switch tabs.</p>
-<div id="grid"></div>
-<div id="status"></div>
-<script src="./basic.bundle.js"></script>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="topbar">
+<div class="topbar-inner">
+    <a class="brand" href="./index.html">
+<span class="brand-mark" aria-hidden="true">
+<i></i>
+<i></i>
+<i></i>
+<i></i>
+</span>Ezygrid</a>
+    <nav aria-label="Examples">
+<a href="index.html">Overview</a>
+<a href="initialization.html">Initialization</a>
+<a href="basic.html" aria-current="page">Formulas</a>
+<a href="full.html">Inventory</a>
+<a href="initialization-global.html">Lifecycle</a>
+<a href="react.html">React</a>
+</nav>
+  </div>
+</header>
+  <main class="container" id="main">
+    <div class="page-heading">
+<p class="eyebrow">Example 02</p>
+<h1>Let the cells do the math.</h1>
+<p class="intro">A quarterly sales worksheet with live formulas, number formats, and a revenue target referenced from another sheet.</p>
+</div>
+<div class="workspace">
+<section class="panel">
+<div class="panel-header">
+<h2>Quarterly sales</h2>
+<div class="toolbar">
+<button type="button" id="btn-update" data-ready disabled>Update February</button>
+<button type="button" id="btn-reset" data-ready disabled>Reset revenue</button>
+</div>
+</div>
+<div class="stats">
+<div class="stat">
+<span>Revenue</span>
+<strong id="revenue">&mdash;</strong>
+</div>
+<div class="stat">
+<span>Cost</span>
+<strong id="cost">&mdash;</strong>
+</div>
+<div class="stat">
+<span>Profit</span>
+<strong id="profit">&mdash;</strong>
+</div>
+</div>
+<div class="grid-host" id="grid"></div>
+<p class="status" id="status" role="status" aria-live="polite">Loading the editor...</p>
+</section>
+<aside class="guide">
+<h2>Try it yourself</h2>
+<ol>
+<li>Edit a revenue value in column <code>B</code>. Column <code>D</code> calculates profit.</li>
+<li>Select <code>B5</code> to see <code>=SUM(B2:B4)</code> in the formula bar.</li>
+<li>Select <code>B7</code>. Its target comes from <code>=Targets!B2</code>, in the workbook's second sheet.</li>
+</ol>
+<p class="hint">Double-click or press <kbd>F2</kbd> to edit. Press <kbd>Enter</kbd> to commit and <kbd>Escape</kbd> to cancel.</p>
+</aside>
+</div>
+<details class="panel code-panel">
+<summary>See the setup</summary>
+<div class="code-body">
+<pre>
+<code id="setup-code">&lt;div id="editor" style="height: 460px"&gt;&lt;/div&gt;
+&lt;script src="/ezygrid/ezygrid.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  Ezygrid.ready.then(() =&gt; {
+    const editor = new Ezygrid({
+      target: '#editor',
+      worksheets: [{
+        name: 'Sales',
+        data: [['Revenue', 'Cost', 'Profit'], [12000, 7000, '=A2-B2']],
+      }],
+    });
+    editor.workbook.activeWorksheet.setValue(1, 0, 15000);
+  }).catch(console.error);
+&lt;/script&gt;</code>
+</pre>
+<button type="button" data-copy="setup-code">Copy code</button>
+</div>
+</details>
+    <footer class="footer">
+<span>Ezygrid / Examples</span>
+<span>
+<a href="./README.md">Setup guide</a> &middot; <a href="../docs/getting-started.md">API quick start</a>
+</span>
+</footer>
+  </main>
+  <script src="../packages/core/dist/browser/ezygrid.js"></script>
+<script src="./basic.js"></script>
 </body>
 </html>

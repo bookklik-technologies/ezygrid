@@ -53,7 +53,7 @@ describe('GridRenderer Phase 2 features', () => {
     renderer.destroy();
   });
 
-  it('fill handle drag down extends a numeric series', () => {
+  it('Alt+drag down extends a numeric series', () => {
     const wb = createGrid(container, {
       worksheets: [{ rows: 100, columns: 10, data: [[2], [4]] }],
     });
@@ -62,7 +62,7 @@ describe('GridRenderer Phase 2 features', () => {
     renderer.getCellElement(1, 0)!.dispatchEvent(
       new MouseEvent('mousedown', { bubbles: true, shiftKey: true }),
     );
-    renderer['fillHandle']!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    renderer['fillHandle']!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, altKey: true }));
     const target = renderer.getCellElement(4, 0)!;
     target.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
     container.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
@@ -73,7 +73,7 @@ describe('GridRenderer Phase 2 features', () => {
     renderer.destroy();
   });
 
-  it('fill handle drag right extends a series', () => {
+  it('Alt+drag right extends a series', () => {
     const wb = createGrid(container, {
       worksheets: [{ rows: 100, columns: 10, data: [[1, 3]] }],
     });
@@ -82,7 +82,7 @@ describe('GridRenderer Phase 2 features', () => {
     renderer.getCellElement(0, 1)!.dispatchEvent(
       new MouseEvent('mousedown', { bubbles: true, shiftKey: true }),
     );
-    renderer['fillHandle']!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
+    renderer['fillHandle']!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, altKey: true }));
     renderer.getCellElement(0, 4)!.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }));
     container.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
     const ws = wb.activeWorksheet;

@@ -1,38 +1,33 @@
-import { execFileSync } from 'node:child_process';
+import { build } from 'esbuild';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const esbuildBin = path.join(root, 'node_modules', '.pnpm', 'esbuild@0.21.5', 'node_modules', 'esbuild', 'bin', 'esbuild');
+await import('./build-browser.mjs');
 
-const aliases = [
-  '--alias:@ezygrid/model=./packages/model/src/index.ts',
-  '--alias:@ezygrid/formula=./packages/formula/src/index.ts',
-  '--alias:@ezygrid/csv=./packages/csv/src/index.ts',
-  '--alias:@ezygrid/core=./packages/core/src/index.ts',
-  '--alias:@ezygrid/react=./packages/react/src/index.tsx',
-];
+const alias = {
+  '@ezygrid/model': './packages/model/src/index.ts',
+  '@ezygrid/formula': './packages/formula/src/index.ts',
+  '@ezygrid/csv': './packages/csv/src/index.ts',
+  '@ezygrid/core': './packages/core/src/index.ts',
+  '@ezygrid/react': './packages/react/src/index.tsx',
+};
 
 const targets = [
-  { entry: 'examples/src/basic.ts', outfile: 'examples/basic.bundle.js' },
-  { entry: 'examples/src/full.ts', outfile: 'examples/full.bundle.js' },
   { entry: 'examples/src/react.tsx', outfile: 'examples/react.bundle.js' },
 ];
 
 for (const target of targets) {
-  execFileSync(
-    process.execPath,
-    [
-      esbuildBin,
-      path.join(root, target.entry),
-      '--bundle',
-      '--format=iife',
-      '--platform=browser',
-      `--outfile=${path.join(root, target.outfile)}`,
-      ...aliases,
-    ],
-    { stdio: 'inherit', cwd: root },
-  );
+  await build({
+    absWorkingDir: root,
+    entryPoints: [target.entry],
+    outfile: target.outfile,
+    bundle: true,
+    format: 'iife',
+    platform: 'browser',
+    alias,
+    logLevel: 'info',
+  });
 }
 
 console.log('examples built');

@@ -1,27 +1,107 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8">
-<title>Ezygrid — full features</title>
-<style>
-  body { font-family: system-ui, sans-serif; margin: 24px auto; max-width: 1080px; }
-  h1 { font-size: 20px; }
-  #grid { height: 560px; border: 1px solid #e4e4e7; }
-  #status { color: #52525b; font-size: 13px; margin-top: 12px; }
-  .row { display: flex; gap: 8px; margin: 12px 0; }
-  button { font: inherit; padding: 6px 12px; cursor: pointer; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Inventory | Ezygrid examples</title>
+  <link rel="stylesheet" href="./examples.css">
+  <script src="./demo.js"></script>
+
 </head>
 <body>
-<h1>Ezygrid — full spreadsheet surface</h1>
-<p>Toolbar + formula bar, validation, conditional formatting, structured table, chart, shape, CSV export.</p>
-<div class="row">
-  <button id="btn-fill">Seed Qty values</button>
-  <button id="btn-csv">Export CSV</button>
-  <button id="btn-chart">Remove chart</button>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="topbar">
+<div class="topbar-inner">
+    <a class="brand" href="./index.html">
+<span class="brand-mark" aria-hidden="true">
+<i></i>
+<i></i>
+<i></i>
+<i></i>
+</span>Ezygrid</a>
+    <nav aria-label="Examples">
+<a href="index.html">Overview</a>
+<a href="initialization.html">Initialization</a>
+<a href="basic.html">Formulas</a>
+<a href="full.html" aria-current="page">Inventory</a>
+<a href="initialization-global.html">Lifecycle</a>
+<a href="react.html">React</a>
+</nav>
+  </div>
+</header>
+  <main class="container" id="main">
+    <div class="page-heading">
+<p class="eyebrow">Example 03</p>
+<h1>Keep inventory in view.</h1>
+<p class="intro">A practical spreadsheet with validated quantities, stock indicators, a chart, and a CSV download.</p>
 </div>
-<div id="grid"></div>
-<div id="status"></div>
-<script src="./full.bundle.js"></script>
+<div class="workspace">
+<section class="panel">
+<div class="panel-header">
+<h2>Inventory</h2>
+<div class="toolbar">
+<button type="button" id="btn-fill" data-ready disabled>Restock items</button>
+<button type="button" id="btn-chart" data-ready disabled>Hide chart</button>
+<button type="button" id="btn-csv" data-ready disabled>Export CSV</button>
+</div>
+</div>
+<div class="stats">
+<div class="stat">
+<span>Products</span>
+<strong>4</strong>
+</div>
+<div class="stat">
+<span>Units in stock</span>
+<strong id="units">&mdash;</strong>
+</div>
+<div class="stat">
+<span>Stock value</span>
+<strong id="value">&mdash;</strong>
+</div>
+</div>
+<div class="grid-host tall" id="grid"></div>
+<p class="status" id="status" role="status" aria-live="polite">Loading the editor...</p>
+</section>
+<aside class="guide">
+<h2>Try it yourself</h2>
+<ol>
+<li>Try entering <code>-1</code> in <code>C2</code>. The quantity rule rejects values outside 0&ndash;1,000.</li>
+<li>Edit a status in column <code>E</code>: <code>in stock</code>, <code>low</code>, or <code>out</code>. The color follows the value.</li>
+<li>Restock the first two products, hide or show the chart, then export your edited data.</li>
+</ol>
+<p class="hint">The toolbar and formula bar are renderer options. This example passes them through <code>renderer</code>.</p>
+</aside>
+</div>
+<details class="panel code-panel">
+<summary>See the setup</summary>
+<div class="code-body">
+<pre>
+<code id="setup-code">&lt;div id="editor" style="height: 460px"&gt;&lt;/div&gt;
+&lt;script src="/ezygrid/ezygrid.js"&gt;&lt;/script&gt;
+&lt;script&gt;
+  Ezygrid.ready.then(() =&gt; {
+    const editor = new Ezygrid({
+      target: '#editor',
+      renderer: { toolbar: true, formulaBar: true },
+      worksheets: [{ data: [['Item', 'Qty'], ['Widget', 25]] }],
+    });
+    editor.workbook.activeWorksheet.addValidation({
+      range: 'B2:B50', type: 'number', action: 'reject', min: 0, max: 1000,
+    });
+  }).catch(console.error);
+&lt;/script&gt;</code>
+</pre>
+<button type="button" data-copy="setup-code">Copy code</button>
+</div>
+</details>
+    <footer class="footer">
+<span>Ezygrid / Examples</span>
+<span>
+<a href="./README.md">Setup guide</a> &middot; <a href="../docs/getting-started.md">API quick start</a>
+</span>
+</footer>
+  </main>
+  <script src="../packages/core/dist/browser/ezygrid.js"></script>
+<script src="./full.js"></script>
 </body>
 </html>

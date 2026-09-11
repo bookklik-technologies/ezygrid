@@ -28251,6 +28251,19 @@
 
   // packages/core/src/fill.ts
   var FillService = class {
+    /** Extend a seed rectangle along both axes, without overwriting its cells.
+     * Rows are extended first; columns then extend the resulting row patterns.
+     */
+    fillRange(worksheet, source, target) {
+      if (target.top > source.top || target.bottom < source.bottom || target.left > source.left || target.right < source.right) {
+        throw new Error("Fill target must contain the source range.");
+      }
+      if (target.top < source.top) this.fill(worksheet, "up", source, target.top);
+      if (target.bottom > source.bottom) this.fill(worksheet, "down", source, target.bottom);
+      const rows = { ...source, top: target.top, bottom: target.bottom };
+      if (target.left < source.left) this.fill(worksheet, "left", rows, target.left);
+      if (target.right > source.right) this.fill(worksheet, "right", rows, target.right);
+    }
     fill(worksheet, direction, rect, targetEnd) {
       if (direction === "down" || direction === "up") {
         const step2 = direction === "down" ? 1 : -1;
@@ -28454,6 +28467,8 @@
     cellPool = [];
     activeCells = /* @__PURE__ */ new Map();
     unlistenOperations = null;
+    unlistenSelection = null;
+    selectionVisible = true;
     scrollRow = 0;
     scrollCol = 0;
     destroyed = false;
@@ -28473,34 +28488,39 @@
       };
       this.selection = new SelectionService(this.worksheet.rowCount, this.worksheet.columnCount);
       this.editing = new EditService();
-      this.registerDefaultCommands();
-      this.build();
-      this.bind();
-      this.render();
-      this.unlistenOperations = workbook.onOperation((operation) => {
-        if (this.destroyed) return;
-        switch (operation.type) {
-          case "cell.set":
-          case "rows.insert":
-          case "rows.delete":
-          case "columns.insert":
-          case "columns.delete":
-            if (operation.worksheetId !== this.worksheet.id) return;
-            break;
-          case "undo":
-          case "redo":
-            break;
-          default:
-            return;
-        }
+      try {
+        this.registerDefaultCommands();
+        this.build();
+        this.bind();
         this.render();
-      });
-      this.workbook.pluginManager.run({
-        workbook: this.workbook,
-        worksheet: this.worksheet,
-        commands: this.commands,
-        renderer: this
-      });
+        this.unlistenOperations = workbook.onOperation((operation) => {
+          if (this.destroyed) return;
+          switch (operation.type) {
+            case "cell.set":
+            case "rows.insert":
+            case "rows.delete":
+            case "columns.insert":
+            case "columns.delete":
+              if (operation.worksheetId !== this.worksheet.id) return;
+              break;
+            case "undo":
+            case "redo":
+              break;
+            default:
+              return;
+          }
+          this.render();
+        });
+        this.workbook.pluginManager.run({
+          workbook: this.workbook,
+          worksheet: this.worksheet,
+          commands: this.commands,
+          renderer: this
+        });
+      } catch (error) {
+        this.destroy();
+        throw error;
+      }
     }
     get topInset() {
       return (this.options.formulaBar ? 24 : 0) + (this.options.toolbar ? 32 : 0);
@@ -28508,6 +28528,7 @@
     formulaBarEl = null;
     nameBox = null;
     formulaInput = null;
+    formulaBarEdit = null;
     contextMenuEl = null;
     zoom = 1;
     /** Pagination view state (§22). */
@@ -28602,6 +28623,7 @@
       this.scrollEl.appendChild(this.spacerEl);
       this.cellLayer = doc.createElement("div");
       this.cellLayer.className = "ezygrid-cells";
+      Object.assign(this.cellLayer.style, { position: "absolute", left: "0", top: "0" });
       this.scrollEl.appendChild(this.cellLayer);
       this.mediaLayer = doc.createElement("div");
       this.mediaLayer.className = "ezygrid-media";
@@ -28654,7 +28676,7 @@
       this.root.appendChild(this.fillRangeLabel);
       this.fillHandle = doc.createElement("div");
       this.fillHandle.className = "ezygrid-fillhandle";
-      this.fillHandle.title = "Drag to fill cells. Press Escape to cancel.";
+      this.fillHandle.title = "Drag to select cells. Alt+drag to autofill. Press Escape to cancel.";
       Object.assign(this.fillHandle.style, {
         position: "absolute",
         width: "8px",
@@ -28752,21 +28774,31 @@
           boxSizing: "border-box",
           font: "inherit"
         });
+        this.formulaInput.addEventListener("focus", () => {
+          this.commitEditor();
+          this.updateFormulaBar();
+          this.beginFormulaBarEdit();
+        });
+        this.formulaInput.addEventListener("input", () => this.beginFormulaBarEdit());
+        this.formulaInput.addEventListener("blur", () => this.commitFormulaBarEdit());
         this.formulaInput.addEventListener("keydown", (e) => {
-          if (e.key === "Enter") {
+          e.stopPropagation();
+          if (e.isComposing || e.keyCode === 229) return;
+          if (e.key === "Enter" || e.key === "Tab") {
             e.preventDefault();
-            const { row, column } = this.selection.state.active;
-            this.worksheet.setValue(row, column, this.formulaInput.value);
-            this.formulaInput.blur();
+            this.commitFormulaBarEdit(true);
+            if (e.key === "Tab") {
+              this.selection.move(e.shiftKey ? "left" : "right", false, false, this.isFilled);
+              this.ensureActiveVisible();
+            }
             this.root.focus({ preventScroll: true });
             this.render();
           } else if (e.key === "Escape") {
             e.preventDefault();
+            this.formulaBarEdit = null;
             this.updateFormulaBar();
-            this.formulaInput.blur();
             this.root.focus({ preventScroll: true });
           }
-          e.stopPropagation();
         });
         bar.append(this.nameBox, this.formulaInput);
         this.formulaBarEl = bar;
@@ -28837,6 +28869,16 @@
       this.container.appendChild(this.root);
     }
     bind() {
+      this.unlistenSelection = this.selection.onChange(() => {
+        const active = this.selection.state.active;
+        if (this.formulaBarEdit && (this.formulaBarEdit.row !== active.row || this.formulaBarEdit.column !== active.column)) {
+          this.commitFormulaBarEdit();
+        }
+        if (this.fillDragging) this.cancelFillDrag();
+        this.renderSelection();
+      });
+      this.container.addEventListener("focusin", this.onFocusIn);
+      this.container.addEventListener("focusout", this.onFocusOut);
       this.scrollEl.addEventListener("scroll", this.onScroll);
       this.cellLayer.addEventListener("mousedown", this.onMouseDown);
       this.cellLayer.addEventListener("dblclick", this.onDoubleClick);
@@ -28848,6 +28890,16 @@
         this.fillHandle.addEventListener("mousedown", this.onFillHandleDown);
       }
     }
+    onFocusIn = () => {
+      this.selectionVisible = true;
+      this.renderSelection();
+    };
+    onFocusOut = (event) => {
+      if (event.relatedTarget instanceof Node && this.container.contains(event.relatedTarget)) return;
+      this.selectionVisible = false;
+      this.cancelFillDrag();
+      this.renderSelection();
+    };
     onFillHandleDown = (event) => {
       if (event.button !== 0) return;
       event.preventDefault();
@@ -28855,6 +28907,7 @@
       this.commitEditor();
       this.root.focus({ preventScroll: true });
       this.fillDragging = true;
+      this.autofillDragging = event.altKey;
       this.fillSource = { ...this.selection.primary };
       this.fillTarget = null;
       this.fillPointer = { x: event.clientX, y: event.clientY };
@@ -28871,7 +28924,7 @@
       const cell = event.target.closest?.(".ezygrid-cell");
       this.fillPointer = { x: event.clientX, y: event.clientY };
       this.fillTarget = null;
-      if (cell instanceof HTMLElement && this.cellLayer.contains(cell)) {
+      if (cell instanceof HTMLElement && this.root.contains(cell)) {
         const { row, col } = cell.dataset;
         if (row !== void 0 && col !== void 0) {
           this.fillTarget = { row: Number(row), column: Number(col) };
@@ -28888,12 +28941,13 @@
     };
     cancelFillDrag = () => {
       this.fillDragging = false;
+      this.autofillDragging = false;
       this.fillSource = null;
       this.fillTarget = null;
       this.fillPointer = null;
-      this.fillPreview.style.display = "none";
-      this.fillRangeLabel.style.display = "none";
-      this.root.style.cursor = "";
+      if (this.fillPreview) this.fillPreview.style.display = "none";
+      if (this.fillRangeLabel) this.fillRangeLabel.style.display = "none";
+      if (this.root) this.root.style.cursor = "";
       const doc = this.container.ownerDocument;
       doc.removeEventListener("mousemove", this.onFillDragMove);
       doc.removeEventListener("mouseup", this.onFillDragEnd);
@@ -28979,14 +29033,17 @@
     }
     onFillDragEnd = (event) => {
       if (!this.fillDragging || event.button !== 0) return;
-      this.onFillDragMove(event);
+      const cell = event.target.closest?.(".ezygrid-cell");
+      if (cell) this.onFillDragMove(event);
+      else if (!(event.target instanceof Node) || !this.container.contains(event.target)) this.fillTarget = null;
       const source = this.fillSource;
       const plan = this.getFillPlan();
+      const autofill = this.autofillDragging;
       this.cancelFillDrag();
       if (!source || !plan) return;
-      this.fill.fill(this.worksheet, plan.direction, source, plan.end);
-      this.selection.setActive(plan.range.top, plan.range.left);
-      this.selection.extendTo(plan.range.bottom, plan.range.right);
+      if (autofill) this.fill.fillRange(this.worksheet, source, plan);
+      this.selection.setActive(plan.top, plan.left);
+      this.selection.extendTo(plan.bottom, plan.right);
       this.render();
     };
     onScroll = () => {
@@ -29029,7 +29086,6 @@
       } else {
         this.selection.setActive(r, c);
       }
-      this.renderSelection();
       this.root.focus({ preventScroll: true });
     };
     onDoubleClick = (event) => {
@@ -29104,8 +29160,7 @@
       }
       if (event.key === "Delete" || event.key === "Backspace") {
         event.preventDefault();
-        const { active } = this.selection.state;
-        this.worksheet.setValue(active.row, active.column, null);
+        this.clearSelectedContents();
         this.render();
         return;
       }
@@ -29126,6 +29181,7 @@
     commands = new CommandRegistry();
     fill = new FillService();
     fillDragging = false;
+    autofillDragging = false;
     fillSource = null;
     fillTarget = null;
     fillPointer = null;
@@ -29134,27 +29190,21 @@
       const source = this.fillSource;
       const target = this.fillTarget;
       if (!source || !target) return null;
-      if (target.row > source.bottom) {
-        return { direction: "down", end: target.row, range: { ...source, bottom: target.row } };
-      }
-      if (target.column > source.right) {
-        return { direction: "right", end: target.column, range: { ...source, right: target.column } };
-      }
-      if (target.row < source.top) {
-        return { direction: "up", end: target.row, range: { ...source, top: target.row } };
-      }
-      if (target.column < source.left) {
-        return { direction: "left", end: target.column, range: { ...source, left: target.column } };
-      }
-      return null;
+      if (target.row >= source.top && target.row <= source.bottom && target.column >= source.left && target.column <= source.right) return null;
+      return {
+        top: Math.min(source.top, target.row),
+        bottom: Math.max(source.bottom, target.row),
+        left: Math.min(source.left, target.column),
+        right: Math.max(source.right, target.column)
+      };
     }
     renderFillPreview() {
       if (!this.fillDragging || !this.fillSource || !this.fillPointer) return;
-      const range = this.getFillPlan()?.range ?? this.fillSource;
+      const range = this.getFillPlan() ?? this.fillSource;
       Object.assign(this.fillPreview.style, {
         display: "block",
-        left: `${this.zOffsetX(range.left) - this.scrollLeft()}px`,
-        top: `${this.zOffsetY(range.top) - this.scrollTop()}px`,
+        left: `${this.zOffsetX(range.left)}px`,
+        top: `${this.zOffsetY(range.top)}px`,
         width: `${this.zOffsetX(range.right + 1) - this.zOffsetX(range.left)}px`,
         height: `${this.zOffsetY(range.bottom + 1) - this.zOffsetY(range.top)}px`
       });
@@ -29173,6 +29223,18 @@
       ));
       this.fillRangeLabel.style.left = `${left}px`;
       this.fillRangeLabel.style.top = `${top}px`;
+    }
+    clearSelectedContents() {
+      const ranges = this.selection.state.ranges.map((range) => ({ ...range }));
+      const cells = [];
+      this.worksheet.cells.forEach((row, column, record) => {
+        if ((record.formula !== void 0 || record.raw != null) && ranges.some((range) => rectContains(range, row, column))) {
+          cells.push({ row, column });
+        }
+      });
+      for (const { row, column } of cells) {
+        this.worksheet.setValue(row, column, null);
+      }
     }
     commandContext() {
       return { workbook: this.workbook, worksheet: this.worksheet, selection: this.selection };
@@ -29509,8 +29571,8 @@
       this.suggestionEl = null;
     }
     positionEditor(input, row, column) {
-      input.style.left = `${this.zOffsetX(column) - this.scrollLeft()}px`;
-      input.style.top = `${this.zOffsetY(row) - this.scrollTop()}px`;
+      input.style.left = `${this.zOffsetX(column)}px`;
+      input.style.top = `${this.zOffsetY(row)}px`;
       input.style.width = `${this.zSizeX(column)}px`;
       input.style.height = `${this.zSizeY(row)}px`;
     }
@@ -29530,10 +29592,10 @@
       const cellBottom = cellTop + this.zSizeY(row);
       const cellLeft = this.zOffsetX(column);
       const cellRight = cellLeft + this.zSizeX(column);
-      if (cellTop < top) this.scrollEl.scrollTop = cellTop / this.zoom;
-      else if (cellBottom > top + height) this.scrollEl.scrollTop = (cellBottom - height) / this.zoom;
-      if (cellLeft < left) this.scrollEl.scrollLeft = cellLeft / this.zoom;
-      else if (cellRight > left + width) this.scrollEl.scrollLeft = (cellRight - width) / this.zoom;
+      if (cellTop < top) this.scrollEl.scrollTop = cellTop;
+      else if (cellBottom > top + height) this.scrollEl.scrollTop = cellBottom - height;
+      if (cellLeft < left) this.scrollEl.scrollLeft = cellLeft;
+      else if (cellRight > left + width) this.scrollEl.scrollLeft = cellRight - width;
     }
     scrollLeft() {
       const value = this.scrollEl.scrollLeft;
@@ -29607,7 +29669,6 @@
       this.applyCellStyle(cell, row, column);
       cell.setAttribute("role", "gridcell");
       cell.setAttribute("aria-colindex", String(column + 1));
-      cell.setAttribute("aria-selected", this.selection.isWithin(row, column) ? "true" : "false");
     }
     applyCellStyle(cell, row, column) {
       const style = this.worksheet.getStyle(row, column);
@@ -29618,11 +29679,7 @@
       cell.style.textDecoration = merged.underline ? "underline" : "";
       cell.style.color = merged.color ?? "";
       cell.style.textAlign = merged.align ?? "";
-      if (this.selection.isWithin(row, column)) {
-        cell.style.background = "var(--ezygrid-selection-soft, rgba(37,99,235,0.08))";
-      } else {
-        cell.style.background = merged.background ?? "";
-      }
+      cell.style.background = merged.background ?? "";
       const table = this.worksheet.tables.at(row, column);
       if (table && row > table.range.top) {
         const bandIndex = row - (table.headerRow ? table.range.top + 1 : table.range.top);
@@ -29633,6 +29690,10 @@
           cell.style.background = "var(--ezygrid-table-band, rgba(0,0,0,0.03))";
         }
       }
+      if (this.selectionVisible && this.selection.isWithin(row, column)) {
+        cell.style.background = "var(--ezygrid-selection-soft, rgba(37,99,235,0.08))";
+      }
+      cell.setAttribute("aria-selected", this.selection.isWithin(row, column) ? "true" : "false");
       const note = this.worksheet.getNote(row, column);
       cell.title = note ?? "";
       cell.dataset.note = note !== void 0 ? "true" : "";
@@ -29681,11 +29742,9 @@
     }
     visibleRowEnd() {
       const ws = this.worksheet;
-      const top = this.scrollTop() / this.zoom;
-      const height = this.viewportHeight() / this.zoom;
       const start = this.visibleRowStart();
       let end = start;
-      let bottom = top + height;
+      const bottom = this.scrollTop() + this.viewportHeight();
       while (end < ws.rowCount && this.zOffsetY(end) < bottom) end += 1;
       end = Math.min(ws.rowCount, end + this.options.overscanRows);
       if (this.pagination) {
@@ -29697,11 +29756,9 @@
     }
     visibleColumnEnd() {
       const ws = this.worksheet;
-      const left = this.scrollLeft() / this.zoom;
-      const width = this.viewportWidth() / this.zoom;
       const start = this.zIndexColumn(this.scrollLeft());
       let end = start;
-      let right = left + width;
+      const right = this.scrollLeft() + this.viewportWidth();
       while (end < ws.columnCount && this.zOffsetX(end) < right) end += 1;
       return Math.min(ws.columnCount, end + this.options.overscanColumns);
     }
@@ -29798,15 +29855,26 @@
         }
       }
     }
-    renderSelection() {
+    renderSelection(refreshStyles = true) {
+      if (this.destroyed) return;
+      if (refreshStyles) {
+        for (const cell of this.activeCells.values()) {
+          this.applyCellStyle(cell, Number(cell.dataset.row), Number(cell.dataset.col));
+        }
+        for (const layer of [this.frozenTopEl, this.frozenLeftEl]) {
+          for (const cell of Array.from(layer.children)) {
+            this.applyCellStyle(cell, Number(cell.dataset.row), Number(cell.dataset.col));
+          }
+        }
+      }
       const ws = this.worksheet;
       const primary = this.selection.primary;
-      const top = this.zOffsetY(primary.top) - this.scrollTop();
-      const left = this.zOffsetX(primary.left) - this.scrollLeft();
+      const top = this.zOffsetY(primary.top);
+      const left = this.zOffsetX(primary.left);
       const height = (ws.rowSizes.offsetOf(primary.bottom) + ws.rowSizes.sizeOf(primary.bottom) - ws.rowSizes.offsetOf(primary.top)) * this.zoom;
       const width = (ws.columnSizes.offsetOf(primary.right) + ws.columnSizes.sizeOf(primary.right) - ws.columnSizes.offsetOf(primary.left)) * this.zoom;
       Object.assign(this.selectionOverlay.style, {
-        display: "block",
+        display: this.selectionVisible ? "block" : "none",
         left: `${left}px`,
         top: `${top}px`,
         width: `${width}px`,
@@ -29814,7 +29882,7 @@
       });
       if (this.fillHandle) {
         Object.assign(this.fillHandle.style, {
-          display: "block",
+          display: this.selectionVisible ? "block" : "none",
           left: `${left + width - 4}px`,
           top: `${top + height - 4}px`
         });
@@ -29822,12 +29890,33 @@
       this.updateFormulaBar();
       this.renderFillPreview();
     }
+    formulaBarText(row, column) {
+      const record = this.worksheet.cells.getCell(row, column);
+      return record?.formula !== void 0 ? record.formula : record?.raw === null || record?.raw === void 0 ? "" : String(record.raw);
+    }
+    beginFormulaBarEdit() {
+      if (this.formulaBarEdit || this.destroyed) return;
+      const { row, column } = this.selection.state.active;
+      this.formulaBarEdit = { row, column, initial: this.formulaBarText(row, column) };
+    }
+    commitFormulaBarEdit(force = false) {
+      if (!this.formulaInput || this.destroyed) return;
+      if (force) this.beginFormulaBarEdit();
+      const draft = this.formulaBarEdit;
+      if (!draft) return;
+      const text = this.formulaInput.value;
+      this.formulaBarEdit = null;
+      if (text !== draft.initial) {
+        this.worksheet.setValue(draft.row, draft.column, text.startsWith("=") ? text : parseEditorValue(text));
+      }
+      this.updateFormulaBar();
+    }
     updateFormulaBar() {
       if (!this.formulaInput || !this.nameBox) return;
-      const { row, column } = this.selection.state.active;
       this.nameBox.value = this.selection.describe();
-      const record = this.worksheet.cells.getCell(row, column);
-      this.formulaInput.value = record?.formula !== void 0 ? record.formula : record?.raw === null || record?.raw === void 0 ? "" : String(record.raw);
+      if (this.formulaBarEdit) return;
+      const { row, column } = this.selection.state.active;
+      this.formulaInput.value = this.formulaBarText(row, column);
     }
     /** Re-render the visible projection. Recycles cell elements between frames. */
     render() {
@@ -29835,6 +29924,8 @@
       const ws = this.worksheet;
       this.spacerEl.style.width = `${ws.columnSizes.totalSize() * this.zoom}px`;
       this.spacerEl.style.height = `${ws.rowSizes.totalSize() * this.zoom}px`;
+      this.scrollRow = this.visibleRowStart();
+      this.scrollCol = this.zIndexColumn(this.scrollLeft());
       for (const [key2, el] of this.activeCells) {
         const [r, c] = key2.split(",").map(Number);
         const covered = ws.merges.isCovered(r, c);
@@ -29846,8 +29937,6 @@
       }
       const rowEnd = this.visibleRowEnd();
       const colEnd = this.visibleColumnEnd();
-      const startX = this.scrollLeft();
-      const startY = this.scrollTop();
       for (let r = this.visibleRowStart(); r < rowEnd; r++) {
         if (ws.isRowHidden(r)) continue;
         for (let c = this.scrollCol; c < colEnd; c++) {
@@ -29855,8 +29944,8 @@
           const key2 = `${r},${c}`;
           const merge = ws.merges.findAt(r, c);
           if (merge && !(merge.top === r && merge.left === c)) continue;
-          const offsetX = this.zOffsetX(c) - startX;
-          const offsetY = this.zOffsetY(r) - startY;
+          const offsetX = this.zOffsetX(c);
+          const offsetY = this.zOffsetY(r);
           const span = merge ? {
             width: (ws.columnSizes.offsetOf(merge.right) + ws.columnSizes.sizeOf(merge.right) - ws.columnSizes.offsetOf(c)) * this.zoom,
             height: (ws.rowSizes.offsetOf(merge.bottom) + ws.rowSizes.sizeOf(merge.bottom) - ws.rowSizes.offsetOf(r)) * this.zoom
@@ -29871,7 +29960,7 @@
       }
       this.renderHeaders();
       this.renderFrozen();
-      this.renderSelection();
+      this.renderSelection(false);
       this.renderMedia();
     }
     /** Floating charts, images and shapes (§30/§31/§32). */
@@ -29931,8 +30020,8 @@
       }
     }
     positionFloating(el, anchor, offsetX, offsetY) {
-      const left = this.zOffsetX(anchor.column) - this.scrollLeft() + (offsetX ?? 0);
-      const top = this.zOffsetY(anchor.row) - this.scrollTop() + (offsetY ?? 0);
+      const left = this.zOffsetX(anchor.column) + (offsetX ?? 0);
+      const top = this.zOffsetY(anchor.row) + (offsetY ?? 0);
       el.style.left = `${left}px`;
       el.style.top = `${top}px`;
     }
@@ -29946,24 +30035,30 @@
       return this.editorInput;
     }
     destroy() {
+      if (this.destroyed) return;
       this.destroyed = true;
+      this.formulaBarEdit = null;
       this.cancelFillDrag();
       this.unlistenOperations?.();
       this.unlistenOperations = null;
-      this.scrollEl.removeEventListener("scroll", this.onScroll);
-      this.cellLayer.removeEventListener("mousedown", this.onMouseDown);
-      this.cellLayer.removeEventListener("dblclick", this.onDoubleClick);
-      this.cellLayer.removeEventListener("contextmenu", this.onContextMenu);
-      this.root.removeEventListener("keydown", this.onKeyDown);
-      this.root.removeEventListener("copy", this.onCopy);
-      this.root.removeEventListener("cut", this.onCut);
-      this.root.removeEventListener("paste", this.onPaste);
+      this.unlistenSelection?.();
+      this.unlistenSelection = null;
+      this.container.removeEventListener("focusin", this.onFocusIn);
+      this.container.removeEventListener("focusout", this.onFocusOut);
+      this.scrollEl?.removeEventListener("scroll", this.onScroll);
+      this.cellLayer?.removeEventListener("mousedown", this.onMouseDown);
+      this.cellLayer?.removeEventListener("dblclick", this.onDoubleClick);
+      this.cellLayer?.removeEventListener("contextmenu", this.onContextMenu);
+      this.root?.removeEventListener("keydown", this.onKeyDown);
+      this.root?.removeEventListener("copy", this.onCopy);
+      this.root?.removeEventListener("cut", this.onCut);
+      this.root?.removeEventListener("paste", this.onPaste);
       this.container.ownerDocument.removeEventListener("mousedown", this.onGlobalMouseDown);
       this.fillHandle?.removeEventListener("mousedown", this.onFillHandleDown);
       this.editing.cancel();
       this.unmountEditor();
       this.contextMenuEl?.remove();
-      this.root.remove();
+      this.root?.remove();
     }
   };
   function columnLabel(index) {
@@ -30021,33 +30116,32 @@
 
   // examples/src/react.tsx
   function App() {
-    return (0, import_react2.createElement)(
-      "div",
-      null,
-      (0, import_react2.createElement)("h2", null, "Ezygrid + React 19"),
-      (0, import_react2.createElement)(Spreadsheet, {
-        worksheets: [
-          {
-            name: "Budget",
-            rows: 200,
-            columns: 10,
-            data: [
-              ["Department", "Budget", "Actual", "Variance"],
-              ["Engineering", 1e5, 92e3, "=B2-C2"],
-              ["Marketing", 4e4, 45e3, "=B3-C3"],
-              ["Ops", 3e4, 27e3, "=B4-C4"]
-            ]
-          }
-        ],
-        renderer: { formulaBar: true, toolbar: true },
-        style: { height: "420px", border: "1px solid #e4e4e7" },
-        onReady: (workbook) => {
-          const sheet = workbook.activeWorksheet;
-          sheet.setStyle("A1:D1", { bold: true, background: "#eef2ff" });
-          sheet.setNumberFormat("B2:D4", "#,##0");
+    return (0, import_react2.createElement)(Spreadsheet, {
+      worksheets: [
+        {
+          name: "Budget",
+          rows: 200,
+          columns: 10,
+          data: [
+            ["Department", "Budget", "Actual", "Variance"],
+            ["Engineering", 1e5, 92e3, "=B2-C2"],
+            ["Marketing", 4e4, 45e3, "=B3-C3"],
+            ["Ops", 3e4, 27e3, "=B4-C4"]
+          ]
         }
-      })
-    );
+      ],
+      renderer: { formulaBar: true, toolbar: true },
+      style: { height: "100%" },
+      onReady: (workbook, renderer) => {
+        const sheet = workbook.activeWorksheet;
+        sheet.columnSizes.setSize(0, 160);
+        sheet.setStyle("A1:D1", { bold: true, background: "#edf3e7" });
+        sheet.setNumberFormat("B2:D4", "#,##0");
+        renderer.render();
+        const status = document.querySelector("#status");
+        if (status) status.textContent = "Ready. Edit actual spend in column C to recalculate variance.";
+      }
+    });
   }
   (0, import_client.createRoot)(document.querySelector("#root")).render((0, import_react2.createElement)(App));
 })();

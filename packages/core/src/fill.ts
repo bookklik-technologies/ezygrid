@@ -1,4 +1,5 @@
 import type { Worksheet } from './workbook.js';
+import type { Rect } from '@ezygrid/model';
 import { translateFormula } from './clipboard.js';
 
 export type FillDirection = 'down' | 'up' | 'right' | 'left';
@@ -12,6 +13,21 @@ export type FillDirection = 'down' | 'up' | 'right' | 'left';
  * - otherwise: copy
  */
 export class FillService {
+  /** Extend a seed rectangle along both axes, without overwriting its cells.
+   * Rows are extended first; columns then extend the resulting row patterns.
+   */
+  fillRange(worksheet: Worksheet, source: Rect, target: Rect): void {
+    if (target.top > source.top || target.bottom < source.bottom ||
+        target.left > source.left || target.right < source.right) {
+      throw new Error('Fill target must contain the source range.');
+    }
+    if (target.top < source.top) this.fill(worksheet, 'up', source, target.top);
+    if (target.bottom > source.bottom) this.fill(worksheet, 'down', source, target.bottom);
+    const rows = { ...source, top: target.top, bottom: target.bottom };
+    if (target.left < source.left) this.fill(worksheet, 'left', rows, target.left);
+    if (target.right > source.right) this.fill(worksheet, 'right', rows, target.right);
+  }
+
   fill(worksheet: Worksheet, direction: FillDirection, rect: { top: number; bottom: number; left: number; right: number }, targetEnd: number): void {
     if (direction === 'down' || direction === 'up') {
       const step = direction === 'down' ? 1 : -1;
