@@ -1,0 +1,23 @@
+{
+  "name": "@ezygrid/formula",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./worker-main": {
+      "types": "./dist/worker-main.d.ts",
+      "import": "./dist/worker-main.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@ezygrid/model": "workspace:*"
+  }
+}

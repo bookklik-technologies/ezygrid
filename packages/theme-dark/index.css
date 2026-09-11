@@ -1,0 +1,14 @@
+/* @ezygrid/theme-dark — import after the default theme (or standalone).
+   Pair with `color-scheme: dark` on the host page. */
+.ezygrid {
+  --ezygrid-font-family: system-ui, sans-serif;
+  --ezygrid-font-size: 13px;
+  --ezygrid-bg: #18181b;
+  --ezygrid-text: #fafafa;
+  --ezygrid-gridline: #3f3f46;
+  --ezygrid-selection: #60a5fa;
+  --ezygrid-selection-soft: rgba(96, 165, 250, 0.12);
+  --ezygrid-header-bg: #27272a;
+  --ezygrid-header-text: #a1a1aa;
+  --ezygrid-table-band: rgba(255, 255, 255, 0.04);
+}

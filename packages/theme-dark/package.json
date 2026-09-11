@@ -1,0 +1,12 @@
+{
+  "name": "@ezygrid/theme-dark",
+  "version": "0.1.0",
+  "description": "Dark theme for Ezygrid (CSS variables only)",
+  "type": "module",
+  "main": "./index.css",
+  "exports": {
+    ".": {
+      "default": "./index.css"
+    }
+  }
+}

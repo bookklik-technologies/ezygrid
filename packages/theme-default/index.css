@@ -1,0 +1,14 @@
+/* @ezygrid/theme-default — light theme (§49).
+   Import after @ezygrid/core; all grid styling reads these variables. */
+.ezygrid {
+  --ezygrid-font-family: system-ui, sans-serif;
+  --ezygrid-font-size: 13px;
+  --ezygrid-bg: #ffffff;
+  --ezygrid-text: #111111;
+  --ezygrid-gridline: #e4e4e7;
+  --ezygrid-selection: #2563eb;
+  --ezygrid-selection-soft: rgba(37, 99, 235, 0.08);
+  --ezygrid-header-bg: #f4f4f5;
+  --ezygrid-header-text: #52525b;
+  --ezygrid-table-band: rgba(0, 0, 0, 0.03);
+}

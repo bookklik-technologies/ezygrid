@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ezygrid — full features</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 24px auto; max-width: 1080px; }
+  h1 { font-size: 20px; }
+  #grid { height: 560px; border: 1px solid #e4e4e7; }
+  #status { color: #52525b; font-size: 13px; margin-top: 12px; }
+  .row { display: flex; gap: 8px; margin: 12px 0; }
+  button { font: inherit; padding: 6px 12px; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Ezygrid — full spreadsheet surface</h1>
+<p>Toolbar + formula bar, validation, conditional formatting, structured table, chart, shape, CSV export.</p>
+<div class="row">
+  <button id="btn-fill">Seed Qty values</button>
+  <button id="btn-csv">Export CSV</button>
+  <button id="btn-chart">Remove chart</button>
+</div>
+<div id="grid"></div>
+<div id="status"></div>
+<script src="./full.bundle.js"></script>
+</body>
+</html>

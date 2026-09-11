@@ -1,0 +1,13 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/model" },
+    { "path": "packages/formula" },
+    { "path": "packages/csv" },
+    { "path": "packages/core" },
+    { "path": "packages/xlsx" },
+    { "path": "packages/react" },
+    { "path": "packages/vue" },
+    { "path": "packages/web-component" }
+  ]
+}

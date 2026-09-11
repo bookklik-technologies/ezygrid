@@ -1,0 +1,27 @@
+{
+  "name": "ezygrid",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@11.24.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/**\" run build",
+    "test": "vitest run",
+    "typecheck": "tsc --build",
+    "lint": "eslint .",
+    "examples:build": "node scripts/build-examples.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "happy-dom": "^20.14.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0",
+    "vue": "^3.5.42"
+  }
+}

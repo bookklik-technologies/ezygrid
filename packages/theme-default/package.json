@@ -1,0 +1,10 @@
+{
+  "name": "@ezygrid/theme-default",
+  "version": "0.1.0",
+  "description": "Default light theme for Ezygrid (CSS variables only)",
+  "type": "module",
+  "main": "./index.css",
+  "exports": {
+    ".": "./index.css"
+  }
+}

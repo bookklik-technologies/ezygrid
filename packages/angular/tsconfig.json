@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist",
+    "rootDir": "src",
+    "experimentalDecorators": true
+  },
+  "include": ["src"],
+  "references": [{ "path": "../model" }, { "path": "../formula" }, { "path": "../csv" }, { "path": "../core" }]
+}
