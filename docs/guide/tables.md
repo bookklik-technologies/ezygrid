@@ -22,7 +22,7 @@ Tables get alternating row banding and a bold total row in the renderer, and the
 
 Formulas can address table data directly:
 
-```
+```text
 =Sales                       ← the table's data range
 =Sales[Revenue]              ← one column
 =Sales[@Price]               ← same row as the formula cell

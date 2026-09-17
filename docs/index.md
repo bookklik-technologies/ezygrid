@@ -1,14 +1,19 @@
 ---
 layout: home
+titleTemplate: false
 
 hero:
   name: Ezygrid
   text: Spreadsheet & data-grid for the web
   tagline: Framework-agnostic JavaScript/TypeScript spreadsheet engine with an Excel-compatible formula engine, virtualized rendering, undo/redo, and first-party integrations for React, Vue, Angular and the web.
+  image: /ezygrid/logo.svg
   actions:
     - theme: brand
       text: Get started
-      link: /guide/installation
+      link: /guide/introduction
+    - theme: alt
+      text: API reference
+      link: /api/editor
     - theme: alt
       text: View on GitHub
       link: https://github.com/bookklik-technologies/ezygrid

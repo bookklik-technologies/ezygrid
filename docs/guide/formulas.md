@@ -57,7 +57,7 @@ Reference cycling while editing: press **F4** to cycle `A1 → $A$1 → A$1 → 
 
 Errors propagate through formulas like Excel:
 
-```
+```text
 #NULL!  #DIV/0!  #VALUE!  #REF!  #NAME?  #NUM!  #N/A  #SPILL!  #CALC!  #CIRCULAR!
 ```
 

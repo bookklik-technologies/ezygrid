@@ -47,7 +47,7 @@ const css = buildThemeCss({ ...darkThemeTokens, selection: '#00ff99' });
 
 The renderer emits stable class names for custom CSS:
 
-```
+```text
 ezygrid, ezygrid-scroll, ezygrid-spacer, ezygrid-cells, ezygrid-row,
 ezygrid-cell, ezygrid-selection, ezygrid-fillhandle, ezygrid-colheader,
 ezygrid-rowheader, ezygrid-corner, ezygrid-frozen-top, ezygrid-frozen-left,

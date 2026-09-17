@@ -2,6 +2,10 @@
 
 Ezygrid is a pnpm workspace monorepo. Node **>= 20** and pnpm **11** are recommended.
 
+::: tip Next step
+Once installed, follow the [Getting started walkthrough](/getting-started) for the fastest path to a working grid.
+:::
+
 ## From the repository
 
 ```bash
