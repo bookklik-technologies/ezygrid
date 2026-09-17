@@ -1,5 +1,4 @@
-import type { AstNode } from './parser.js';
-import type { EvalContext, RuntimeValue, FunctionImpl } from './functions.js';
+import type { FunctionImpl } from './functions.js';
 import { FUNCTIONS } from './functions.js';
 
 export interface FunctionMeta {

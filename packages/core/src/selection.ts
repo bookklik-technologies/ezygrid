@@ -111,6 +111,73 @@ export class SelectionService {
     this.emit();
   }
 
+  /** Update dimension counts after structural changes; state is clamped (F15). */
+  resize(rowCount: number, columnCount: number): void {
+    this.rowCount = Math.max(1, rowCount);
+    this.columnCount = Math.max(1, columnCount);
+    this.clampState();
+    this.emit();
+  }
+
+  /**
+   * Shift every stored coordinate through a structural insert/delete so
+   * active cell, anchor and ranges follow the data they described (F15).
+   */
+  transformAxis(axis: 'row' | 'column', at: number, delta: number): void {
+    const shift = (pos: number): number | undefined => {
+      if (delta > 0) return pos >= at ? pos + delta : pos;
+      const count = -delta;
+      if (pos < at) return pos;
+      if (pos < at + count) return undefined;
+      return pos - count;
+    };
+    const mapPoint = (
+      p: { row: number; column: number },
+    ): { row: number; column: number } | undefined => {
+      if (axis === 'row') {
+        const row = shift(p.row);
+        return row === undefined ? undefined : { row, column: p.column };
+      }
+      const column = shift(p.column);
+      return column === undefined ? undefined : { row: p.row, column };
+    };
+    const mapRect = (rect: Rect): Rect | undefined => {
+      if (axis === 'row') {
+        const top = shift(rect.top);
+        const bottom = shift(rect.bottom);
+        if (top === undefined || bottom === undefined) return undefined;
+        return { ...rect, top, bottom };
+      }
+      const left = shift(rect.left);
+      const right = shift(rect.right);
+      if (left === undefined || right === undefined) return undefined;
+      return { ...rect, left, right };
+    };
+    const fallback = axis === 'row' ? at : Math.max(0, at - 1);
+    this.state.active = mapPoint(this.state.active) ?? { row: fallback, column: fallback };
+    this.state.anchor = mapPoint(this.state.anchor) ?? { row: fallback, column: fallback };
+    this.state.ranges = this.state.ranges
+      .map(mapRect)
+      .filter((rect): rect is Rect => rect !== undefined);
+    if (this.state.ranges.length === 0) {
+      this.state.ranges = [{ top: this.state.active.row, left: this.state.active.column, bottom: this.state.active.row, right: this.state.active.column }];
+    }
+    this.clampState();
+    this.emit();
+  }
+
+  /** Clamp every stored coordinate inside the current dimensions. */
+  private clampState(): void {
+    this.state.active = this.clamp(this.state.active.row, this.state.active.column);
+    this.state.anchor = this.clamp(this.state.anchor.row, this.state.anchor.column);
+    this.state.ranges = this.state.ranges.map((rect) => ({
+      top: Math.max(0, Math.min(this.rowCount - 1, rect.top)),
+      left: Math.max(0, Math.min(this.columnCount - 1, rect.left)),
+      bottom: Math.max(0, Math.min(this.rowCount - 1, rect.bottom)),
+      right: Math.max(0, Math.min(this.columnCount - 1, rect.right)),
+    }));
+  }
+
   get primary(): Rect {
     return this.state.ranges[this.state.ranges.length - 1]!;
   }

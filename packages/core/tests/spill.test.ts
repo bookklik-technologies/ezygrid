@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { createGrid } from '../src/index.js';
-import type { MatrixValue } from '@ezygrid/formula';
 
 describe('Spill engine', () => {
   it('spills a dynamic array into neighboring cells', () => {

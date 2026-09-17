@@ -1,14 +1,22 @@
 import type { ChartData, ChartSpec } from './charts.js';
-import { DEFAULT_CHART_COLORS } from './charts.js';
+import { DEFAULT_CHART_COLORS, sanitizeChartColor } from './charts.js';
 
 /**
  * Internal SVG chart engine (§31.3). Pure function: ChartSpec + data in,
  * SVG markup out. Chart data stays provider-neutral.
+ *
+ * Every interpolated value is validated or escaped at this boundary (F01):
+ * colors go through sanitizeChartColor, geometry is clamped to finite
+ * numbers, and text is XML-escaped — configuration strings can never
+ * become markup.
  */
 export function renderChartSVG(spec: ChartSpec, data: ChartData): string {
-  const width = spec.width ?? 320;
-  const height = spec.height ?? 240;
-  const colors = spec.colors ?? DEFAULT_CHART_COLORS;
+  const width = clampNumber(spec.width, 320, 16, 4096);
+  const height = clampNumber(spec.height, 240, 16, 4096);
+  const colors = (spec.colors ?? DEFAULT_CHART_COLORS).map(
+    (color) => sanitizeChartColor(String(color)) ?? '',
+  ).filter((color) => color !== '');
+  const safeColors = colors.length > 0 ? colors : [...DEFAULT_CHART_COLORS];
   const padding = { top: 28, right: 12, bottom: 32, left: 44 };
   const plotW = Math.max(10, width - padding.left - padding.right);
   const plotH = Math.max(10, height - padding.top - padding.bottom);
@@ -20,10 +28,20 @@ export function renderChartSVG(spec: ChartSpec, data: ChartData): string {
   switch (spec.type) {
     case 'pie':
     case 'doughnut':
-      return pieSVG(spec, data, colors, title, width, height);
+      return pieSVG(spec, data, safeColors, title, width, height);
     default:
-      return cartesianSVG(spec, data, colors, title, width, height, padding, plotW, plotH);
+      return cartesianSVG(spec, data, safeColors, title, width, height, padding, plotW, plotH);
   }
+}
+
+function clampNumber(value: number | undefined, fallback: number, min: number, max: number): number {
+  const n = typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function clampV(v: number): number {
+  // Guard against division issues in downstream arithmetic.
+  return Number.isFinite(v) ? v : 0;
 }
 
 function cartesianSVG(
@@ -37,30 +55,41 @@ function cartesianSVG(
   plotW: number,
   plotH: number,
 ): string {
-  const allValues = data.series.flatMap((s) => s.values);
-  const maxV = Math.max(1, ...allValues);
+  const allValues = data.series.flatMap((s) => s.values.filter((v): v is number => v !== null));
+  const maxV = Math.max(1, ...allValues.map((v) => clampV(v)));
   const categoryCount = Math.max(1, data.categories.length);
   const bandW = plotW / categoryCount;
   const bandH = plotH / categoryCount;
 
-  let axes = `<line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + plotH}" stroke="currentColor" stroke-opacity="0.3"/>
+  const axes = `<line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + plotH}" stroke="currentColor" stroke-opacity="0.3"/>
 <line x1="${padding.left}" x2="${padding.left + plotW}" y1="${padding.top + plotH}" y2="${padding.top + plotH}" stroke="currentColor" stroke-opacity="0.3"/>
 <text x="${padding.left - 4}" y="${padding.top + 4}" text-anchor="end" font-size="9" fill="currentColor" fill-opacity="0.7">${formatTick(maxV)}</text>
 <text x="${padding.left - 4}" y="${padding.top + plotH + 4}" font-size="9" fill="currentColor" fill-opacity="0.7">0</text>`;
 
   let content = '';
   data.series.forEach((series, seriesIndex) => {
-    const color = colors[seriesIndex % colors.length];
+    const color = colors[seriesIndex % colors.length]!;
     if (spec.type === 'line') {
-      const points = series.values
-        .map((v, i) => {
-          const x = padding.left + bandW * i + bandW / 2;
-          const y = padding.top + plotH - (v / maxV) * plotH;
-          return `${round(x)},${round(y)}`;
-        })
-        .join(' ');
-      content += `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2"/>`;
+      // Segmented polyline: null values break the line instead of
+      // connecting across the gap (F22).
+      const segments: string[][] = [];
+      let current: string[] = [];
       series.values.forEach((v, i) => {
+        if (v === null) {
+          if (current.length > 0) segments.push(current);
+          current = [];
+          return;
+        }
+        const x = padding.left + bandW * i + bandW / 2;
+        const y = padding.top + plotH - (v / maxV) * plotH;
+        current.push(`${round(x)},${round(y)}`);
+      });
+      if (current.length > 0) segments.push(current);
+      for (const points of segments) {
+        content += `<polyline points="${points.join(' ')}" fill="none" stroke="${color}" stroke-width="2"/>`;
+      }
+      series.values.forEach((v, i) => {
+        if (v === null) return;
         const x = padding.left + bandW * i + bandW / 2;
         const y = padding.top + plotH - (v / maxV) * plotH;
         content += `<circle cx="${round(x)}" cy="${round(y)}" r="3" fill="${color}"/>`;
@@ -70,6 +99,7 @@ function cartesianSVG(
       const groupCount = data.series.length;
       const barW = (bandW * 0.7) / groupCount;
       series.values.forEach((v, i) => {
+        if (v === null) return; // missing data leaves a gap, no bar (F22)
         const barH = (v / maxV) * plotH;
         if (spec.type === 'bar') {
           const y = padding.top + bandH * i + (bandH - barW * groupCount) / 2 + barW * seriesIndex;
@@ -104,7 +134,7 @@ function pieSVG(
   height: number,
 ): string {
   const values = data.series[0]?.values ?? [];
-  const total = values.reduce((a, b) => a + b, 0) || 1;
+  const total = values.reduce<number>((a, b) => a + (b ?? 0), 0) || 1;
   const cx = width / 2;
   const cy = height / 2 + 6;
   const radius = Math.min(width, height) / 2 - 12;
@@ -113,16 +143,14 @@ function pieSVG(
   let angle = -Math.PI / 2;
   let paths = '';
   values.forEach((v, i) => {
+    if (v === null) return; // missing data draws no slice (F22)
     const slice = (v / total) * Math.PI * 2;
     const end = angle + slice;
     paths += slicePath(cx, cy, radius, inner, angle, end, colors[i % colors.length]!);
     angle = end;
   });
 
-  const legend = data.series[0]?.name
-    ? `<text x="${cx}" y="${height - 6}" text-anchor="middle" font-size="10" fill="currentColor" fill-opacity="0.8">${escapeXml(data.series[0]!.name)}</text>`
-    : '';
-
+  // The legend text is part of the series title; pie slices carry no labels.
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${title}${paths}</svg>`;
 }
 

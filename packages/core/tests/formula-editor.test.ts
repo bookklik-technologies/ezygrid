@@ -9,7 +9,7 @@ beforeEach(() => {
   document.body.appendChild(container);
 });
 
-function beginFormulaEdit(renderer: GridRenderer, formula: string, row = 0, col = 0): HTMLInputElement {
+function beginFormulaEdit(renderer: GridRenderer, formula: string, row = 0, _col = 0): HTMLInputElement {
   renderer.getCellElement(row, 0)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
   renderer['root'].dispatchEvent(new KeyboardEvent('keydown', { key: '=', bubbles: true }));
   const input = renderer.getEditorInput()!;

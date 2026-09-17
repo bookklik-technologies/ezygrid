@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { createGrid, renderChartSVG, readChartData, newPivotSpec } from '../src/index.js';
-import type { PivotSpec, Worksheet } from '../src/index.js';
+import type { Worksheet } from '../src/index.js';
 
 function salesSheet(): Worksheet {
   const wb = createGrid(null, {
@@ -39,7 +39,6 @@ describe('Charts v1 (§31)', () => {
   });
 
   it('renders valid SVG for cartesian and pie charts', () => {
-    const ws = salesSheet();
     const data = {
       categories: ['Jan', 'Feb', 'Mar'],
       series: [

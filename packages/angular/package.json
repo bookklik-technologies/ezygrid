@@ -23,21 +23,19 @@
     "ezygrid"
   ],
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
-  },
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "ng-packagr -p ng-package.json"
   },
   "peerDependencies": {
+    "@angular/common": ">=17",
     "@angular/core": ">=17"
   },
+  "devDependencies": {
+    "ng-packagr": "22.1.1",
+    "typescript": "6.0.2"
+  },
   "dependencies": {
-    "@ezygrid/core": "workspace:*"
+    "@ezygrid/core": "workspace:*",
+    "tslib": "2.8.1"
   }
 }

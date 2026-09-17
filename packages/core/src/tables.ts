@@ -23,6 +23,17 @@ export interface TableDefinition {
  */
 export class TableStore {
   private tables: TableDefinition[] = [];
+  /** Owning worksheet (set by the Worksheet field initializer). */
+  private owner?: Worksheet;
+
+  constructor(owner?: Worksheet) {
+    this.owner = owner;
+  }
+
+  private invalidateOpaqueReaders(): void {
+    // Table definitions resolve dynamically: readers recompute (F02).
+    this.owner?.workbook.formulaGraph.invalidateOpaqueFormulas();
+  }
 
   add(worksheet: Worksheet, options: { name: string; range: string; headerRow?: boolean; totalRow?: boolean }): TableDefinition {
     const rect = parseRange(options.range);
@@ -46,6 +57,7 @@ export class TableStore {
       columns,
     };
     this.tables.push(table);
+    this.invalidateOpaqueReaders();
     return table;
   }
 
@@ -65,6 +77,7 @@ export class TableStore {
 
   remove(name: string): void {
     this.tables = this.tables.filter((t) => t.name !== name);
+    this.invalidateOpaqueReaders();
   }
 
   /**

@@ -23,6 +23,9 @@ describe('DependencyGraph evaluation', () => {
     g.setFormula('Sheet1', 2, 0, '=A2+1', Parser.parse('A2+1'));
     expect(g.recalculate('Sheet1', 2, 0, raw)).toBe(3);
     a1 = 5;
+    // Incremental evaluation contract (F02): external raw changes must be
+    // notified so dependents recompute; the workbook does this on setValue.
+    g.notifyCellChange('Sheet1', 0, 0);
     expect(g.recalculate('Sheet1', 2, 0, raw)).toBe(11);
   });
 

@@ -1,4 +1,4 @@
-import { RefFlags, parseRef, toA1, columnToIndex, indexToColumn } from './coordinates.js';
+import { columnToIndex, indexToColumn } from './coordinates.js';
 
 /**
  * Reference Transform Engine (Phase 0 prototype).
@@ -196,4 +196,33 @@ export function transformAddress(address: string, shift: RefTransform): string {
   const mapped = transformRefToken(body, shift);
   if (mapped === undefined) return '#REF!';
   return prefix + mapped;
+}
+
+/**
+ * Rewrite sheet qualifiers in a formula body after a worksheet rename
+ * (F11): qualified references pointing at the old name follow the rename.
+ */
+export function renameSheetRefs(formula: string, from: string, to: string): string {
+  if (!from || from === to) return formula;
+  const tokens = tokenizeFormula(formula);
+  let out = '';
+  for (const token of tokens) {
+    if (!token.isRef) {
+      out += token.text;
+      continue;
+    }
+    const bang = token.text.lastIndexOf('!');
+    if (bang < 0) {
+      out += token.text;
+      continue;
+    }
+    const qualifier = unquoteSheet(token.text.slice(0, bang));
+    if (qualifier === from) {
+      const quoted = /[\s'!]/.test(to) ? `'${to.replace(/'/g, "''")}'` : to;
+      out += `${quoted}!${token.text.slice(bang + 1)}`;
+    } else {
+      out += token.text;
+    }
+  }
+  return out;
 }

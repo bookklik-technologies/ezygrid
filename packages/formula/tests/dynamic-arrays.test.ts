@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Parser, isMatrix, type MatrixValue } from '../src/index.js';
+import { isMatrix, type MatrixValue } from '../src/index.js';
 import { evaluateStandalone } from '../src/index.js';
 
 function evalExpr(expression: string, values: Record<string, unknown> = {}): unknown {

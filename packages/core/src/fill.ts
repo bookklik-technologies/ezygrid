@@ -15,36 +15,53 @@ export type FillDirection = 'down' | 'up' | 'right' | 'left';
 export class FillService {
   /** Extend a seed rectangle along both axes, without overwriting its cells.
    * Rows are extended first; columns then extend the resulting row patterns.
+   * The whole fill is one history transaction (F09).
    */
   fillRange(worksheet: Worksheet, source: Rect, target: Rect): void {
     if (target.top > source.top || target.bottom < source.bottom ||
         target.left > source.left || target.right < source.right) {
       throw new Error('Fill target must contain the source range.');
     }
-    if (target.top < source.top) this.fill(worksheet, 'up', source, target.top);
-    if (target.bottom > source.bottom) this.fill(worksheet, 'down', source, target.bottom);
-    const rows = { ...source, top: target.top, bottom: target.bottom };
-    if (target.left < source.left) this.fill(worksheet, 'left', rows, target.left);
-    if (target.right > source.right) this.fill(worksheet, 'right', rows, target.right);
+    const history = worksheet.workbook.history;
+    history.beginBatch();
+    worksheet.workbook.beginUpdate();
+    try {
+      if (target.top < source.top) this.fill(worksheet, 'up', source, target.top);
+      if (target.bottom > source.bottom) this.fill(worksheet, 'down', source, target.bottom);
+      const rows = { ...source, top: target.top, bottom: target.bottom };
+      if (target.left < source.left) this.fill(worksheet, 'left', rows, target.left);
+      if (target.right > source.right) this.fill(worksheet, 'right', rows, target.right);
+    } finally {
+      worksheet.workbook.endUpdate();
+      history.endBatch();
+    }
   }
 
   fill(worksheet: Worksheet, direction: FillDirection, rect: { top: number; bottom: number; left: number; right: number }, targetEnd: number): void {
-    if (direction === 'down' || direction === 'up') {
-      const step = direction === 'down' ? 1 : -1;
-      const start = direction === 'down' ? rect.bottom + 1 : rect.top - 1;
-      for (let row = start; direction === 'down' ? row <= targetEnd : row >= targetEnd; row += step) {
-        for (let c = rect.left; c <= rect.right; c++) {
-          worksheet.setValue(row, c, this.inferValue(worksheet, rect.top, rect.bottom, c, row - rect.top, 'row'));
+    const history = worksheet.workbook.history;
+    history.beginBatch();
+    worksheet.workbook.beginUpdate();
+    try {
+      if (direction === 'down' || direction === 'up') {
+        const step = direction === 'down' ? 1 : -1;
+        const start = direction === 'down' ? rect.bottom + 1 : rect.top - 1;
+        for (let row = start; direction === 'down' ? row <= targetEnd : row >= targetEnd; row += step) {
+          for (let c = rect.left; c <= rect.right; c++) {
+            worksheet.setValue(row, c, this.inferValue(worksheet, rect.top, rect.bottom, c, row - rect.top, 'row'));
+          }
+        }
+        return;
+      }
+      const step = direction === 'right' ? 1 : -1;
+      const start = direction === 'right' ? rect.right + 1 : rect.left - 1;
+      for (let column = start; direction === 'right' ? column <= targetEnd : column >= targetEnd; column += step) {
+        for (let r = rect.top; r <= rect.bottom; r++) {
+          worksheet.setValue(r, column, this.inferValue(worksheet, rect.left, rect.right, r, column - rect.left, 'column'));
         }
       }
-      return;
-    }
-    const step = direction === 'right' ? 1 : -1;
-    const start = direction === 'right' ? rect.right + 1 : rect.left - 1;
-    for (let column = start; direction === 'right' ? column <= targetEnd : column >= targetEnd; column += step) {
-      for (let r = rect.top; r <= rect.bottom; r++) {
-        worksheet.setValue(r, column, this.inferValue(worksheet, rect.left, rect.right, r, column - rect.left, 'column'));
-      }
+    } finally {
+      worksheet.workbook.endUpdate();
+      history.endBatch();
     }
   }
 

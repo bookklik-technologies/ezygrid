@@ -55,8 +55,10 @@ export async function workbookFromXlsx(bytes: Uint8Array): Promise<Workbook> {
     const relTarget = ref.rid !== undefined ? rels.get(ref.rid) : undefined;
     const path = relTarget ? resolvePartPath(relTarget) : `xl/worksheets/sheet${index + 1}.xml`;
     const xml = files.get(path);
+    // Missing referenced parts are an import failure, never an empty
+    // worksheet that silently loses data (F03).
     if (!xml) {
-      return { name: ref.name, cells: [], merges: [] };
+      throw new Error(`missing worksheet part ${path} for sheet "${ref.name}"`);
     }
     const parsed = parseSheetXml(decode(xml));
     return { name: ref.name, ...parsed };

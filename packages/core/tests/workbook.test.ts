@@ -72,10 +72,16 @@ describe('Workbook model', () => {
     const wb = new Workbook({
       worksheets: [{ name: 'S1', data: [['a', 1, '=B1*2']] }],
     });
-    const json = wb.toJSON() as { format: string; version: number; worksheets: { data: unknown[][] }[] };
+    const json = wb.toJSON() as { format: string; version: number; worksheets: unknown[] };
     expect(json.format).toBe('ezygrid');
-    expect(json.version).toBe(1);
-    expect(json.worksheets[0]!.data[0]).toContain('a');
+    expect(json.version).toBe(2);
+    // Versioned snapshot loads back through the native loader (F13).
+    const restored = Workbook.fromJSON(wb.toJSON());
+    const sheet = restored.worksheets[0]!;
+    expect(sheet.name).toBe('S1');
+    expect(sheet.getValue(0, 0)).toBe('a');
+    expect(sheet.getValue(0, 1)).toBe(1);
+    expect(sheet.getValue(0, 2)).toBe(2);
   });
 
   it('renders #DIV/0! as error string', () => {

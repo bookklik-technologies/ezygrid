@@ -8,6 +8,7 @@
     { "path": "packages/xlsx" },
     { "path": "packages/react" },
     { "path": "packages/vue" },
-    { "path": "packages/web-component" }
+    { "path": "packages/web-component" },
+    { "path": "packages/angular" }
   ]
 }

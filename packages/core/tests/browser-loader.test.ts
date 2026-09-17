@@ -2,7 +2,7 @@
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
+import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { Ezygrid } from '../src/ezy-grid.js';
 import { startBrowserLoader, type BrowserManifest } from '../src/browser-loader.js';
@@ -166,8 +166,10 @@ describe('classic script loader', () => {
 });
 
 describe('generated browser distribution', () => {
-  const root = fileURLToPath(new URL('../../..', import.meta.url));
-  const output = new URL('../dist/browser/', import.meta.url);
+  // import.meta.url is not a file URL under the Vite transform, so derive
+  // locations from the vitest root (the repository root).
+  const root = process.cwd();
+  const output = path.join(root, 'packages', 'core', 'dist', 'browser');
   beforeAll(() => {
     execFileSync(process.execPath, ['scripts/build-browser.mjs'], { cwd: root, stdio: 'pipe' });
   });
@@ -176,15 +178,15 @@ describe('generated browser distribution', () => {
     const h = harness();
     document.body.innerHTML = '<div id="auto" data-ezg-editor></div><div id="manual"></div>';
     const globals = { window, document, URL, HTMLElement, navigator: window.navigator, crypto: window.crypto };
-    const loader = readFileSync(new URL('ezygrid.js', output), 'utf8');
-    const manifest = JSON.parse(readFileSync(new URL('manifest.json', output), 'utf8')) as BrowserManifest;
+    const loader = readFileSync(path.join(output, 'ezygrid.js'), 'utf8');
+    const manifest = JSON.parse(readFileSync(path.join(output, 'manifest.json'), 'utf8')) as BrowserManifest;
     runInNewContext(loader, globals);
     const ready = window.Ezygrid.ready;
     expect(h.requests).toHaveLength(Object.keys(manifest.modules).length);
     expect(h.requests.length).toBeGreaterThan(2);
     for (const request of [...h.requests].reverse()) {
       const file = new URL(request.src).pathname.split('/assets/ezygrid/')[1]!;
-      const source = readFileSync(new URL(file, output), 'utf8');
+      const source = readFileSync(path.join(output, file), 'utf8');
       h.currentScript.mockReturnValue(request);
       runInNewContext(source, globals);
       request.dispatchEvent(new Event('load'));

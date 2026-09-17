@@ -41,7 +41,6 @@ export class PivotEngine {
   compute(worksheet: Worksheet, spec: PivotSpec): { header: string[]; rows: unknown[][]; grandTotals: unknown[] } {
     const rect = parseRange(spec.source);
     const headerOffset = 1;
-    const groupCols = spec.rows;
     const valueCols = spec.values;
 
     const groups = new Map<string, unknown[][]>();

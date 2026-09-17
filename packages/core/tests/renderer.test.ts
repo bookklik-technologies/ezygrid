@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, beforeEach } from 'vitest';
 import { GridRenderer, createGrid } from '../src/index.js';
-import type { Workbook, Worksheet } from '../src/index.js';
+import type { Worksheet } from '../src/index.js';
 
 let container: HTMLElement;
 
@@ -158,7 +158,7 @@ describe('GridRenderer (DOM viewport)', () => {
     renderer.destroy();
   });
 
-  it('Ctrl+C copies and Ctrl+V pastes with formula translation', () => {
+  it('Ctrl+C copies and Ctrl+V pastes with formula translation', async () => {
     const wb = createGrid(container, {
       worksheets: [{ rows: 100, columns: 10, data: [[10, 20], ['=A1+B1']] }],
     });
@@ -174,13 +174,15 @@ describe('GridRenderer (DOM viewport)', () => {
     renderer['root'].dispatchEvent(
       new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true }),
     );
+    // Ctrl+V reads the system clipboard asynchronously before pasting.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const ws = wb.activeWorksheet;
     expect(ws.getValue(4, 0)).toBe(30);
     expect(ws.cells.getCell(4, 0)?.formula).toBe('=A4+B4');
     renderer.destroy();
   });
 
-  it('Ctrl+X cuts: values move and source clears', () => {
+  it('Ctrl+X cuts: values move and source clears', async () => {
     const wb = createGrid(container, {
       worksheets: [{ rows: 100, columns: 10, data: [['val']] }],
     });
@@ -193,6 +195,8 @@ describe('GridRenderer (DOM viewport)', () => {
     renderer['root'].dispatchEvent(
       new KeyboardEvent('keydown', { key: 'v', ctrlKey: true, bubbles: true }),
     );
+    // Ctrl+V reads the system clipboard asynchronously before pasting.
+    await new Promise((resolve) => setTimeout(resolve, 0));
     const ws = wb.activeWorksheet;
     expect(ws.getValue(0, 0)).toBeNull();
     expect(ws.getValue(2, 0)).toBe('val');

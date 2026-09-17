@@ -77,6 +77,9 @@ export class GridRenderer {
   private mediaLayer: HTMLElement | null = null;
   private cellPool: HTMLElement[] = [];
   private activeCells = new Map<string, HTMLElement>();
+  private activeRows = new Map<number, HTMLElement>();
+  private domId: string;
+  private disposePlugins: (() => void) | null = null;
   private unlistenOperations: (() => void) | null = null;
   private unlistenSelection: (() => void) | null = null;
   private selectionVisible = true;
@@ -88,6 +91,7 @@ export class GridRenderer {
     this.container = container;
     this.workbook = workbook;
     this.worksheet = workbook.activeWorksheet;
+    this.domId = `ezygrid-${Math.random().toString(36).slice(2, 10)}`;
     this.options = {
       overscanRows: options.overscanRows ?? 5,
       overscanColumns: options.overscanColumns ?? 2,
@@ -107,18 +111,35 @@ export class GridRenderer {
       this.render();
       // Model changes drive rendering: edits, structural operations and
       // undo/redo replay refresh the visible projection automatically.
+      // Cross-sheet operations also repaint because visible formulas may
+      // depend on the edited sheet (F20).
       this.unlistenOperations = workbook.onOperation((operation) => {
         if (this.destroyed) return;
         switch (operation.type) {
           case 'cell.set':
+          case 'meta.set':
+          case 'merges.set':
+          case 'workbook.update':
+            break;
           case 'rows.insert':
           case 'rows.delete':
           case 'columns.insert':
-          case 'columns.delete':
-            if (operation.worksheetId !== this.worksheet.id) return;
+          case 'columns.delete': {
+            if (operation.worksheetId === this.worksheet.id) {
+              const payload = operation.payload as { index: number; count: number };
+              const axis = operation.type.startsWith('rows') ? 'row' : 'column';
+              const delta = operation.type.endsWith('insert') ? payload.count : -payload.count;
+              // Selection bounds, anchors and ranges follow structural
+              // changes (F15).
+              this.selection.transformAxis(axis, payload.index, delta);
+              this.selection.resize(this.worksheet.rowCount, this.worksheet.columnCount);
+            }
             break;
+          }
           case 'undo':
           case 'redo':
+            // Replay can apply structural operations; resync bounds (F15).
+            this.selection.resize(this.worksheet.rowCount, this.worksheet.columnCount);
             break;
           default:
             return;
@@ -126,7 +147,9 @@ export class GridRenderer {
         this.render();
       });
       // Plugins run once the public surfaces (commands, renderer) exist (§44).
-      this.workbook.pluginManager.run({
+      // The attachment is tracked so renderer disposal releases exactly its
+      // own plugin resources (F17).
+      this.disposePlugins = workbook.pluginManager.attach({
         workbook: this.workbook,
         worksheet: this.worksheet,
         commands: this.commands,
@@ -706,7 +729,7 @@ export class GridRenderer {
     if (!source || !plan) return;
     // Expanding a selection must never write cell data. Only an explicit
     // Alt+drag requests autofill (which may overwrite destination values).
-    if (autofill) this.fill.fillRange(this.worksheet, source, plan);
+    if (autofill) this.batchHistory(() => this.fill.fillRange(this.worksheet, source, plan));
     this.selection.setActive(plan.top, plan.left);
     this.selection.extendTo(plan.bottom, plan.right);
     this.render();
@@ -722,8 +745,8 @@ export class GridRenderer {
     // Right-click selection is handled by the context menu so ranges survive.
     if (event.button !== 0) return;
     const target = event.target as HTMLElement;
-    let row = target.dataset?.row;
-    let column = target.dataset?.col;
+    const row = target.dataset?.row;
+    const column = target.dataset?.col;
     if (row === undefined || column === undefined) return;
     let r = Number(row);
     let c = Number(column);
@@ -814,8 +837,22 @@ export class GridRenderer {
       this.render();
       return;
     }
-    // Let the browser dispatch native clipboard events, including external paste.
-    if (ctrl && ['c', 'x', 'v'].includes(event.key.toLowerCase())) return;
+    // Handle clipboard keys directly: environments without native clipboard
+    // event synthesis (happy-dom, some embedded webviews) never dispatch
+    // copy/cut/paste from a synthetic keydown, so the grid would drop the
+    // gesture. copySelection/pasteSelection write through navigator.clipboard
+    // when available and fall back to the internal buffer (§12).
+    if (ctrl && ['c', 'x', 'v'].includes(event.key.toLowerCase())) {
+      event.preventDefault();
+      const key = event.key.toLowerCase();
+      if (key === 'v') {
+        void this.pasteSelection();
+      } else {
+        this.copySelection(key === 'x');
+        this.render();
+      }
+      return;
+    }
     if (event.key === 'F2') {
       event.preventDefault();
       this.beginEditAt();
@@ -823,7 +860,6 @@ export class GridRenderer {
     }
     if (event.key === 'Enter') {
       event.preventDefault();
-      const { row } = this.selection.state.active;
       this.selection.move('down', event.shiftKey, false, this.isFilled);
       this.render();
       return;
@@ -913,6 +949,17 @@ export class GridRenderer {
     this.fillRangeLabel.style.top = `${top}px`;
   }
 
+  /** Group a multi-cell user action into one history entry (F09). */
+  private batchHistory(run: () => void): void {
+    const history = this.workbook.history;
+    history.beginBatch();
+    try {
+      run();
+    } finally {
+      history.endBatch();
+    }
+  }
+
   private clearSelectedContents(): void {
     const ranges = this.selection.state.ranges.map((range) => ({ ...range }));
     const cells: { row: number; column: number }[] = [];
@@ -924,9 +971,11 @@ export class GridRenderer {
         cells.push({ row, column });
       }
     });
-    for (const { row, column } of cells) {
-      this.worksheet.setValue(row, column, null);
-    }
+    this.batchHistory(() => {
+      for (const { row, column } of cells) {
+        this.worksheet.setValue(row, column, null);
+      }
+    });
   }
 
   private commandContext(): CommandContext {
@@ -1034,7 +1083,7 @@ export class GridRenderer {
   private pasteText(text?: string, row = this.selection.state.active.row, column = this.selection.state.active.column): void {
     this.root.querySelector('.ezygrid-clipboard-status')?.remove();
     // Keep styles and relative references for a range copied inside this grid.
-    if (text !== undefined && (!this.clipboard.getBuffer() || text !== this.clipboard.toTSV())) {
+    if (text !== undefined && text !== '' && (!this.clipboard.getBuffer() || text !== this.clipboard.toTSV())) {
       this.clipboard.loadTSV(text);
     }
     this.clipboard.pasteTo(this.workbook, this.worksheet, row, column);
@@ -1046,14 +1095,22 @@ export class GridRenderer {
     const { row, column } = this.selection.state.active;
     const clipboard = this.container.ownerDocument.defaultView?.navigator.clipboard;
     let text: string | undefined;
-    try {
-      text = await clipboard?.readText();
-    } catch {
-      // Internal copy/paste still works when browser clipboard access is denied.
+    if (clipboard?.readText) {
+      try {
+        text = await clipboard.readText();
+      } catch {
+        // Internal copy/paste still works when browser clipboard access is denied.
+      }
     }
     if (this.destroyed) return;
-    if (text === undefined && !this.clipboard.getBuffer()) {
-      this.showClipboardHint();
+    if (!text) {
+      // No system-clipboard text (denied access, empty clipboard): the
+      // internal buffer keeps intra-grid copy/paste working (§12).
+      if (!this.clipboard.getBuffer()) {
+        this.showClipboardHint();
+        return;
+      }
+      this.pasteText(undefined, row, column);
       return;
     }
     this.pasteText(text, row, column);
@@ -1094,11 +1151,13 @@ export class GridRenderer {
       }
     }
     if (cut) {
-      for (let r = primary.top; r <= primary.bottom; r++) {
-        for (let c = primary.left; c <= primary.right; c++) {
-          this.worksheet.setValue(r, c, null);
+      this.batchHistory(() => {
+        for (let r = primary.top; r <= primary.bottom; r++) {
+          for (let c = primary.left; c <= primary.right; c++) {
+            this.worksheet.setValue(r, c, null);
+          }
         }
-      }
+      });
     }
   }
 
@@ -1196,6 +1255,11 @@ export class GridRenderer {
       if (e.key === 'F4') {
         e.preventDefault();
         cycleReference(input as HTMLInputElement);
+        return;
+      }
+      // IME candidate confirmation: Enter/Escape during composition must not
+      // commit or cancel the edit (F18).
+      if (e.isComposing || e.keyCode === 229) {
         return;
       }
       if (e.key === 'Enter') {
@@ -1377,6 +1441,7 @@ export class GridRenderer {
       borderBottom: '1px solid var(--ezygrid-gridline, #e4e4e7)',
       padding: '0 6px',
       lineHeight: 'calc(var(--ezygrid-font-size, 13px) + 8px)',
+      pointerEvents: 'auto',
     } as CSSStyleDeclaration);
     return div;
   }
@@ -1389,9 +1454,33 @@ export class GridRenderer {
     span?: { width: number; height: number },
   ): void {
     const cell = this.acquireCell();
+    // Cells live inside a virtualized row container so assistive technology
+    // can derive row ownership and position (F24).
+    this.rowElementFor(row).appendChild(cell);
     this.activeCells.set(`${row},${column}`, cell);
-    this.cellLayer.appendChild(cell);
     this.paintCell(cell, row, column, offsetX, offsetY, span);
+  }
+
+  /** Create or reuse the accessibility row container for a visible row (F24). */
+  private rowElementFor(row: number): HTMLElement {
+    let rowEl = this.activeRows.get(row);
+    if (rowEl) return rowEl;
+    const doc = this.container.ownerDocument;
+    rowEl = doc.createElement('div');
+    rowEl.className = 'ezygrid-row';
+    rowEl.setAttribute('role', 'row');
+    rowEl.setAttribute('aria-rowindex', String(row + 1));
+    Object.assign(rowEl.style, {
+      position: 'absolute',
+      left: '0',
+      top: '0',
+      width: `${this.worksheet.columnSizes.totalSize() * this.zoom}px`,
+      height: '0',
+      pointerEvents: 'none',
+    } as CSSStyleDeclaration);
+    this.activeRows.set(row, rowEl);
+    this.cellLayer.appendChild(rowEl);
+    return rowEl;
   }
 
   /** Fill a (new or recycled) cell element with current content and state. */
@@ -1404,6 +1493,7 @@ export class GridRenderer {
     span?: { width: number; height: number },
   ): void {
     const ws = this.worksheet;
+    cell.id = `${this.domId}-cell-${row}-${column}`;
     cell.dataset.row = String(row);
     cell.dataset.col = String(column);
     cell.style.left = `${offsetX}px`;
@@ -1416,6 +1506,7 @@ export class GridRenderer {
     this.applyCellStyle(cell, row, column);
     cell.setAttribute('role', 'gridcell');
     cell.setAttribute('aria-colindex', String(column + 1));
+    cell.setAttribute('aria-rowindex', String(row + 1));
   }
 
   private applyCellStyle(cell: HTMLElement, row: number, column: number): void {
@@ -1427,7 +1518,7 @@ export class GridRenderer {
     cell.style.textDecoration = merged.underline ? 'underline' : '';
     cell.style.color = merged.color ?? '';
     cell.style.textAlign = merged.align ?? '';
-    cell.style.background = merged.background ?? '';
+    this.setCellBackground(cell, merged.background ?? '');
     // Structured table banding (§25).
     const table = this.worksheet.tables.at(row, column);
     if (table && row > table.range.top) {
@@ -1436,18 +1527,29 @@ export class GridRenderer {
       if (totalRowCell) {
         cell.style.fontWeight = 'bold';
       } else if (bandIndex % 2 === 1 && !merged.background) {
-        cell.style.background = 'var(--ezygrid-table-band, rgba(0,0,0,0.03))';
+        this.setCellBackground(cell, 'var(--ezygrid-table-band, rgba(0,0,0,0.03))');
       }
     }
     // Selection is transient and takes precedence over table banding. Restore
     // the actual cell background on the next selection/focus change.
     if (this.selectionVisible && this.selection.isWithin(row, column)) {
-      cell.style.background = 'var(--ezygrid-selection-soft, rgba(37,99,235,0.08))';
+      this.setCellBackground(cell, 'var(--ezygrid-selection-soft, rgba(37,99,235,0.08))');
     }
     cell.setAttribute('aria-selected', this.selection.isWithin(row, column) ? 'true' : 'false');
     const note = this.worksheet.getNote(row, column);
     cell.title = note ?? '';
     cell.dataset.note = note !== undefined ? 'true' : '';
+  }
+
+  /**
+   * Assign the background through the property API: the shorthand setter
+   * cannot reliably replace an existing var() value in some DOM
+   * implementations (happy-dom), and a stale selection tint must never
+   * survive a restore.
+   */
+  private setCellBackground(cell: HTMLElement, value: string): void {
+    cell.style.removeProperty('background');
+    if (value !== '') cell.style.setProperty('background', value);
   }
 
   private renderFrozen(): void {
@@ -1623,6 +1725,13 @@ export class GridRenderer {
 
   private renderSelection(refreshStyles = true): void {
     if (this.destroyed) return;
+    // Expose the active cell to assistive technology through
+    // aria-activedescendant (F24).
+    const active = this.selection.state.active;
+    const activeId = `${this.domId}-cell-${active.row}-${active.column}`;
+    if (this.root.getAttribute('aria-activedescendant') !== activeId) {
+      this.root.setAttribute('aria-activedescendant', activeId);
+    }
     if (refreshStyles) {
       for (const cell of this.activeCells.values()) {
         this.applyCellStyle(cell, Number(cell.dataset.row), Number(cell.dataset.col));
@@ -1706,6 +1815,10 @@ export class GridRenderer {
     if (this.destroyed) return;
     const ws = this.worksheet;
 
+    // Accessibility counts follow structural changes every frame (F15).
+    this.root.setAttribute('aria-rowcount', String(ws.rowCount));
+    this.root.setAttribute('aria-colcount', String(ws.columnCount));
+
     this.spacerEl.style.width = `${ws.columnSizes.totalSize() * this.zoom}px`;
     this.spacerEl.style.height = `${ws.rowSizes.totalSize() * this.zoom}px`;
 
@@ -1729,6 +1842,18 @@ export class GridRenderer {
         el.remove();
         this.cellPool.push(el);
         this.activeCells.delete(key);
+      }
+    }
+    // Release accessibility row containers that no longer hold cells (F24).
+    for (const [row, rowEl] of this.activeRows) {
+      const stillPopulated = [...this.activeCells.values()].some(
+        (cell) => Number(cell.dataset.row) === row,
+      );
+      if (!stillPopulated) {
+        rowEl.remove();
+        this.activeRows.delete(row);
+      } else {
+        rowEl.style.width = `${ws.columnSizes.totalSize() * this.zoom}px`;
       }
     }
 
@@ -1850,6 +1975,10 @@ export class GridRenderer {
     this.destroyed = true;
     this.formulaBarEdit = null;
     this.cancelFillDrag();
+    // Plugin attachments (timers, listeners, observers) go first so plugin
+    // teardown sees an intact renderer (F17).
+    this.disposePlugins?.();
+    this.disposePlugins = null;
     this.unlistenOperations?.();
     this.unlistenOperations = null;
     this.unlistenSelection?.();
@@ -1889,7 +2018,7 @@ export function cycleReference(input: HTMLInputElement): void {
   const matches = [...value.matchAll(/(\$?)([A-Za-z]{1,3})(\$?)([0-9]{1,7})(?![A-Za-z0-9])/g)];
   const last = matches[matches.length - 1];
   if (!last) return;
-  const [, dc, letters, dr, digits] = last;
+  const [, , letters, , digits] = last;
   const states = [
     `${letters}${digits}`,
     `$${letters}$${digits}`,

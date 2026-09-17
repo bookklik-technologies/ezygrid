@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 // @vitest-environment happy-dom
-import { createGrid, definePlugin, GridRenderer, buildThemeCss, darkThemeTokens, defaultThemeTokens, highContrastThemeTokens, type ThemeTokens } from '../src/index.js';
+import { createGrid, definePlugin, GridRenderer, buildThemeCss, defaultThemeTokens, highContrastThemeTokens, type ThemeTokens } from '../src/index.js';
 
 describe('Plugin authoring kit (§44)', () => {
   it('definePlugin registers commands through the plugin context', () => {

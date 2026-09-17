@@ -202,10 +202,71 @@ export class Parser {
   }
 }
 
+export interface CellRef {
+  sheet?: string;
+  row: number;
+  column: number;
+}
+
+export interface RangeRef {
+  sheet?: string;
+  start: { row: number; column: number };
+  end: { row: number; column: number };
+}
+
+export interface FormulaDependencies {
+  refs: CellRef[];
+  ranges: RangeRef[];
+  /**
+   * True when the formula reads through an unregistered dynamic source
+   * (defined name or structured table reference). Such formulas cannot be
+   * invalidated through refs/ranges alone and must be treated conservatively
+   * by dirty tracking (F02).
+   */
+  opaque?: boolean;
+}
+
+/**
+ * Extract dependencies from an AST without expanding ranges into per-cell
+ * references: rectangular ranges are kept as ranges so a small formula
+ * (e.g. =SUM(A1:XFD1048576)) cannot force billion-entry registration.
+ */
+export function collectDependencies(node: AstNode, out: FormulaDependencies = { refs: [], ranges: [] }): FormulaDependencies {
+  switch (node.kind) {
+    case 'ref':
+      out.refs.push({ sheet: node.sheet, row: node.row, column: node.column });
+      break;
+    case 'range':
+      out.ranges.push({ sheet: node.sheet, start: { ...node.start }, end: { ...node.end } });
+      break;
+    case 'structured':
+      out.opaque = true;
+      break;
+    case 'name':
+      out.opaque = true;
+      break;
+    case 'unary':
+    case 'percent':
+      collectDependencies(node.operand, out);
+      break;
+    case 'binary':
+      collectDependencies(node.left, out);
+      collectDependencies(node.right, out);
+      break;
+    case 'call':
+      for (const a of node.args) collectDependencies(a, out);
+      break;
+    default:
+      break;
+  }
+  return out;
+}
+
 /** Extract referenced cells (row, column, sheet) from an AST for the dependency graph. */
 export function collectRefs(
   node: AstNode,
-  out: { sheet?: string; row: number; column: number }[] = [],
+  out: CellRef[] = [],
+  budget = 1_000_000,
 ): typeof out {
   switch (node.kind) {
     case 'ref':
@@ -214,6 +275,7 @@ export function collectRefs(
     case 'range':
       for (let r = node.start.row; r <= node.end.row; r++) {
         for (let c = node.start.column; c <= node.end.column; c++) {
+          if (out.length >= budget) throw new Error('reference budget exceeded');
           out.push({ sheet: node.sheet, row: r, column: c });
         }
       }

@@ -5,6 +5,8 @@ export interface ClipboardCell {
   raw?: unknown;
   formula?: string;
   style?: CellStyle;
+  /** Keep raw text verbatim on paste (never reinterpreted as a formula). */
+  literal?: boolean;
 }
 
 export interface ClipboardRange {
@@ -41,7 +43,20 @@ export class ClipboardService {
           row.push({ raw: worksheet.getValue(r, c) as unknown });
         } else {
           const record = worksheet.cells.getCell(r, c);
-          row.push(record ? { raw: record.raw, formula: record.formula, style: worksheet.getStyle(r, c) } : { raw: null });
+          if (record) {
+            row.push({
+              raw: record.raw,
+              formula: record.formula,
+              style: worksheet.getStyle(r, c),
+              // A raw text value starting with "=" must paste as text (F16).
+              literal:
+                record.formula === undefined &&
+                typeof record.raw === 'string' &&
+                record.raw.startsWith('='),
+            });
+          } else {
+            row.push({ raw: null });
+          }
         }
       }
       cells.push(row);
@@ -74,44 +89,74 @@ export class ClipboardService {
       .join('\n');
   }
 
-  /** Parse external TSV into a clipboard payload. */
+  /**
+   * Parse external TSV into a clipboard payload. The parser is quote-aware
+   * over the WHOLE stream: quoted multiline cells stay one field and blank
+   * lines are preserved as rows (F16).
+   */
   static fromTSV(text: string): ClipboardRange {
+    const normalized = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
     const rows: ClipboardCell[][] = [];
-    const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-    for (const line of lines) {
-      if (line === '') continue;
-      const cells: ClipboardCell[] = [];
-      let i = 0;
-      while (i <= line.length) {
-        if (line[i] === '"') {
-          let value = '';
-          i += 1;
-          while (i < line.length) {
-            if (line[i] === '"' && line[i + 1] === '"') {
-              value += '"';
-              i += 2;
-            } else if (line[i] === '"') {
-              i += 1;
-              break;
-            } else {
-              value += line[i]!;
-              i += 1;
-            }
-          }
-          cells.push({ raw: value });
-        } else {
-          let value = '';
-          while (i < line.length && line[i] !== '\t') {
-            value += line[i]!;
+    let cells: ClipboardCell[] = [];
+    let field = '';
+    let quoted = false;
+
+    const pushField = (): void => {
+      // A quoted field is always text; an unquoted field may become a
+      // formula (spreadsheet semantics) or a number.
+      if (quoted) {
+        cells.push({ raw: field, literal: true });
+      } else {
+        const isNumeric = field !== '' && /^-?\d+(\.\d+)?$/.test(field);
+        cells.push({ raw: isNumeric ? Number(field) : field === '' ? null : field });
+      }
+      field = '';
+      quoted = false;
+    };
+
+    for (let i = 0; i < normalized.length; ) {
+      const ch = normalized[i]!;
+      if (quoted) {
+        if (ch === '"') {
+          if (normalized[i + 1] === '"') {
+            field += '"';
+            i += 2;
+          } else {
+            quoted = false;
             i += 1;
           }
-          const isNumeric = value !== '' && /^-?\d+(\.\d+)?$/.test(value);
-          cells.push({ raw: isNumeric ? Number(value) : value === '' ? null : value });
+        } else {
+          field += ch;
+          i += 1;
         }
-        i += 1;
+        continue;
       }
+      if (ch === '"') {
+        quoted = true;
+        i += 1;
+        continue;
+      }
+      if (ch === '\t') {
+        pushField();
+        i += 1;
+        continue;
+      }
+      if (ch === '\n') {
+        pushField();
+        rows.push(cells);
+        cells = [];
+        i += 1;
+        continue;
+      }
+      field += ch;
+      i += 1;
+    }
+    // Trailing row unless the text ended exactly on a newline.
+    if (field !== '' || cells.length > 0) {
+      pushField();
       rows.push(cells);
     }
+
     const height = rows.length;
     const width = rows.reduce((max, r) => Math.max(max, r.length), 0);
     for (const row of rows) {
@@ -122,26 +167,38 @@ export class ClipboardService {
 
   /**
    * Paste the buffer at a target anchor. Relative formula references move
-   * with the paste offset; absolute parts stay fixed (§12.3).
+   * with the paste offset; absolute parts stay fixed (§12.3). The whole
+   * paste is one history transaction (F09).
    */
   pasteTo(workbook: Workbook, worksheet: Worksheet, anchorRow: number, anchorColumn: number): void {
     if (!this.buffer) return;
-    const dRow = anchorRow - this.buffer.origin.row;
-    const dCol = anchorColumn - this.buffer.origin.column;
-    for (let r = 0; r < this.buffer.rows; r++) {
-      for (let c = 0; c < this.buffer.columns; c++) {
-        const source = this.buffer.cells[r]![c]!;
-        const targetRow = anchorRow + r;
-        const targetColumn = anchorColumn + c;
-        if (source.formula !== undefined) {
-          worksheet.setValue(targetRow, targetColumn, translateFormula(source.formula, dRow, dCol));
-        } else {
-          worksheet.setValue(targetRow, targetColumn, source.raw ?? null);
-        }
-        if (source.style) {
-          worksheet.setStyle(toA1(targetRow, targetColumn), source.style);
+    const history = workbook.history;
+    history.beginBatch();
+    // One notification transaction for the whole paste: one render pass (F02).
+    workbook.beginUpdate();
+    try {
+      const dRow = anchorRow - this.buffer.origin.row;
+      const dCol = anchorColumn - this.buffer.origin.column;
+      for (let r = 0; r < this.buffer.rows; r++) {
+        for (let c = 0; c < this.buffer.columns; c++) {
+          const source = this.buffer.cells[r]![c]!;
+          const targetRow = anchorRow + r;
+          const targetColumn = anchorColumn + c;
+          if (source.formula !== undefined) {
+            worksheet.setValue(targetRow, targetColumn, translateFormula(source.formula, dRow, dCol));
+          } else if (source.literal) {
+            worksheet.setValue(targetRow, targetColumn, source.raw ?? null, { literal: true });
+          } else {
+            worksheet.setValue(targetRow, targetColumn, source.raw ?? null);
+          }
+          if (source.style) {
+            worksheet.setStyle(toA1(targetRow, targetColumn), source.style);
+          }
         }
       }
+    } finally {
+      workbook.endUpdate();
+      history.endBatch();
     }
   }
 }

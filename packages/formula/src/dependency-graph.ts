@@ -1,5 +1,5 @@
 import type { AstNode } from './parser.js';
-import { collectRefs } from './parser.js';
+import { collectDependencies } from './parser.js';
 import type { EvalContext, RuntimeValue } from './functions.js';
 import { FUNCTIONS } from './functions.js';
 import { FormulaError, ERR } from './errors.js';
@@ -15,7 +15,29 @@ export interface CellAddress {
 export type NamesResolver = (name: string) => RuntimeValue;
 
 /** Resolves structured table references: TableName, TableName[Column], Table[@Column] (§25). */
-export type TableResolver = (table: string, column?: string, item?: boolean) => RuntimeValue;
+export interface TableResolutionContext {
+  /** Sheet key the formula lives on (workbook-unique). */
+  sheet: string;
+  /** Row/column of the formula cell (for current-row item references). */
+  row: number;
+  column: number;
+}
+
+export type TableResolver = (
+  table: string,
+  column: string | undefined,
+  item: boolean | undefined,
+  context: TableResolutionContext,
+) => RuntimeValue;
+
+/** A rectangular dependency stored as a range (never expanded per cell). */
+interface RangeDep {
+  sheet: string;
+  top: number;
+  left: number;
+  bottom: number;
+  right: number;
+}
 
 interface FormulaEntry {
   /** Owning sheet; refs inside the formula resolve against this sheet. */
@@ -25,7 +47,10 @@ interface FormulaEntry {
   value: RuntimeValue;
   dependents: Set<string>; // keys of formulas that depend on this formula
   precedents: Set<string>;
+  ranges: RangeDep[];
   evaluating: boolean;
+  /** Reads through a defined name / structured table (conservative invalidation). */
+  opaqueDeps?: boolean;
 }
 
 function key(sheet: string | undefined, row: number, column: number, currentSheet: string): string {
@@ -46,17 +71,46 @@ export type RawValueResolver = (
   column: number,
 ) => RuntimeValue;
 
+/** Resource budgets so hostile or accidental inputs fail predictably (F02). */
+export interface GraphBudgets {
+  /** Maximum cells materialized from a single range argument. */
+  maxRangeCells?: number;
+  /** Maximum expression evaluation depth. */
+  maxDepth?: number;
+}
+
+const DEFAULT_MAX_RANGE_CELLS = 2_000_000;
+const DEFAULT_MAX_DEPTH = 1000;
+
 /**
  * Dependency graph + incremental evaluator.
  * Recalculation propagates only through affected dependents; cycles are
- * detected via an evaluating flag and produce #CIRCULAR!.
+ * detected via an evaluating flag and produce #CIRCULAR!. Values are
+ * memoized per calculation pass: shared dependency branches evaluate once.
  */
 export class DependencyGraph {
   private formulas = new Map<string, FormulaEntry>();
+  /** sheet -> formulaKey -> range dependencies registered by that formula. */
+  private rangesBySheet = new Map<string, Map<string, RangeDep[]>>();
   private currentSheet = '';
   private namesResolver: NamesResolver | undefined;
   private tableResolver: TableResolver | undefined;
   private letScopes: Map<string, RuntimeValue>[] = [];
+  private depth = 0;
+  private maxRangeCells: number;
+  private maxDepth: number;
+  /**
+   * Cells whose cached value is stale (F02): the entry itself or one of its
+   * transitive precedents changed. Evaluation recomputes exactly these.
+   */
+  private dirty = new Set<string>();
+  /** Formulas with opaque (name/table) dependencies, workbook-wide. */
+  private opaqueFormulas = new Set<string>();
+
+  constructor(budgets: GraphBudgets = {}) {
+    this.maxRangeCells = budgets.maxRangeCells ?? DEFAULT_MAX_RANGE_CELLS;
+    this.maxDepth = budgets.maxDepth ?? DEFAULT_MAX_DEPTH;
+  }
 
   setCurrentSheet(sheet: string): void {
     this.currentSheet = sheet;
@@ -79,17 +133,26 @@ export class DependencyGraph {
   /** Register or update a formula at the given cell. */
   setFormula(sheet: string, row: number, column: number, formula: string, ast: AstNode): void {
     const k = key(sheet, row, column, sheet);
-    const refs = collectRefs(ast).map((r) => ({
+    const deps = collectDependencies(ast);
+    const refs = deps.refs.map((r) => ({
       sheet: r.sheet ?? sheet,
       row: r.row,
       column: r.column,
     }));
     const refKeys = refs.map((r) => key(r.sheet, r.row, r.column, sheet));
+    const rangeDeps: RangeDep[] = deps.ranges.map((r) => ({
+      sheet: r.sheet ?? sheet,
+      top: Math.min(r.start.row, r.end.row),
+      left: Math.min(r.start.column, r.end.column),
+      bottom: Math.max(r.start.row, r.end.row),
+      right: Math.max(r.start.column, r.end.column),
+    }));
     const existing = this.formulas.get(k);
     if (existing) {
       for (const p of existing.precedents) {
         this.formulas.get(p)?.dependents.delete(k);
       }
+      this.unregisterRanges(k, existing.sheet);
     }
     const entry: FormulaEntry = {
       sheet,
@@ -98,9 +161,13 @@ export class DependencyGraph {
       value: null,
       dependents: existing?.dependents ?? new Set(),
       precedents: new Set(refKeys),
+      ranges: rangeDeps,
       evaluating: false,
+      opaqueDeps: deps.opaque === true,
     };
     this.formulas.set(k, entry);
+    if (deps.opaque === true) this.opaqueFormulas.add(k);
+    else this.opaqueFormulas.delete(k);
     for (const p of refKeys) {
       // Precedents that are themselves formulas get this as dependent.
       this.formulas.get(p)?.dependents.add(k);
@@ -114,19 +181,42 @@ export class DependencyGraph {
           value: null,
           dependents: new Set([k]),
           precedents: new Set(),
+          ranges: [],
           evaluating: false,
         });
       }
     }
+    // Link formulas whose registered ranges contain this cell: they read it.
+    const sheetRanges = this.rangesBySheet.get(sheet);
+    if (sheetRanges) {
+      for (const [ownerKey, ownerRanges] of sheetRanges) {
+        if (ownerKey === k) continue;
+        if (ownerRanges.some((range) => withinRange(range, row, column))) {
+          this.formulas.get(ownerKey)?.dependents.add(k);
+          entry.precedents.add(ownerKey);
+        }
+      }
+    }
+    if (rangeDeps.length > 0) {
+      let bucket = this.rangesBySheet.get(sheet);
+      if (!bucket) {
+        bucket = new Map();
+        this.rangesBySheet.set(sheet, bucket);
+      }
+      bucket.set(k, rangeDeps);
+    }
     this.markDirty(k);
   }
 
-  removeFormula(sheet: string, row: number, column: number): void {    const k = key(sheet, row, column, sheet);
+  removeFormula(sheet: string, row: number, column: number): void {
+    const k = key(sheet, row, column, sheet);
     const entry = this.formulas.get(k);
     if (!entry) return;
     for (const p of entry.precedents) {
       this.formulas.get(p)?.dependents.delete(k);
     }
+    this.unregisterRanges(k, sheet);
+    this.opaqueFormulas.delete(k);
     // Keep placeholder dependents chain: dependents of this cell keep pointing at placeholder.
     if (entry.formula) {
       // real formula removed: convert to placeholder if it has dependents
@@ -135,36 +225,134 @@ export class DependencyGraph {
         entry.ast = { kind: 'number', value: 0 };
         entry.value = null;
         entry.evaluating = false;
+        entry.ranges = [];
+        entry.opaqueDeps = false;
         this.markDirty(k);
         return;
       }
       this.formulas.delete(k);
     }
+    this.dirty.delete(k);
   }
 
-  /** Recalculate the formula at k and all transitive dependents. */
-  private evaluate(k: string, getRaw: RawValueResolver, visited: Set<string>): RuntimeValue {
-    visited.add(k);
+  /** Remove every registration of a removed worksheet so its formulas can never evaluate again (F11). */
+  removeSheet(sheet: string): void {
+    const doomed: string[] = [];
+    for (const [k, entry] of this.formulas) {
+      if (entry.sheet === sheet) doomed.push(k);
+    }
+    for (const k of doomed) {
+      const entry = this.formulas.get(k);
+      if (!entry) continue;
+      for (const p of entry.precedents) {
+        this.formulas.get(p)?.dependents.delete(k);
+      }
+      for (const d of entry.dependents) {
+        this.formulas.get(d)?.precedents.delete(k);
+      }
+      this.unregisterRanges(k, entry.sheet);
+      this.opaqueFormulas.delete(k);
+      this.dirty.delete(k);
+      this.formulas.delete(k);
+    }
+    this.rangesBySheet.delete(sheet);
+  }
+
+  private unregisterRanges(k: string, sheet: string): void {
+    const bucket = this.rangesBySheet.get(sheet);
+    if (!bucket) return;
+    bucket.delete(k);
+    if (bucket.size === 0) this.rangesBySheet.delete(sheet);
+  }
+
+  /**
+   * Recalculate the formula at k and all transitive dependents. The `done`
+   * set memoizes every formula computed during this pass so shared
+   * dependency branches evaluate exactly once (F02).
+   */
+  private evaluate(k: string, getRaw: RawValueResolver, done: Set<string>): RuntimeValue {
     const entry = this.formulas.get(k);
     if (!entry) return null;
+    if (done.has(k)) return entry.value;
     if (entry.evaluating) throw ERR.CIRCULAR();
     if (!entry.formula) return entry.value;
+    // Incremental cache (F02): a clean entry's cached value is current
+    // because every mutation path marks it (or a transitive precedent) dirty.
+    // The cached hit still joins the pass's `done` set so the dependent
+    // walk in evaluateWithDependents cannot loop through it forever.
+    if (!this.dirty.has(k)) {
+      done.add(k);
+      return entry.value;
+    }
     entry.evaluating = true;
     try {
       // Refs inside a formula resolve against the formula's OWN sheet, not
       // the sheet of the caller that triggered recalculation.
-      const value = this.evaluateNode(entry.ast, this.buildContext(getRaw, visited, entry.sheet));
+      const [, entryRow, entryColumn] = splitKey(k);
+      const value = this.evaluateNode(
+        entry.ast,
+        this.buildContext(getRaw, done, entry.sheet, entryRow, entryColumn),
+      );
       entry.value = value;
     } catch (e) {
       entry.value = e instanceof FormulaError ? e : ERR.VALUE();
     } finally {
       entry.evaluating = false;
+      done.add(k);
+      // The value is now current; invalidation restarts via markDirty.
+      this.dirty.delete(k);
     }
     return entry.value;
   }
 
+  /**
+   * Mark the entry at `k` and its whole transitive dependent subgraph dirty
+   * (F02): any of them may read the changed value on their next evaluation.
+   * The visited set is separate from `dirty`: placeholder entries never
+   * evaluate (so never clear their dirty flag) and must not stop the walk.
+   */
   private markDirty(k: string): void {
-    // Lazily: values are computed on demand via recalculate().
+    const visited = new Set<string>();
+    const stack: string[] = [k];
+    while (stack.length > 0) {
+      const current = stack.pop()!;
+      if (visited.has(current)) continue;
+      visited.add(current);
+      this.dirty.add(current);
+      const entry = this.formulas.get(current);
+      if (entry) for (const dependent of entry.dependents) stack.push(dependent);
+    }
+  }
+
+  /**
+   * Invalidate every formula with opaque (name/table) dependencies (F02):
+   * defined names and table definitions are resolved dynamically, so their
+   * add/remove/redefinition can change any of these formulas' results.
+   */
+  invalidateOpaqueFormulas(): void {
+    for (const k of this.opaqueFormulas) this.markDirty(k);
+  }
+
+  /**
+   * Notify the graph that a raw (non-formula) value changed at the cell, so
+   * dependents and range/structured readers recompute (F02). Formulas whose
+   * dependencies are opaque (names/tables) are invalidated workbook-wide.
+   */
+  notifyCellChange(sheet: string, row: number, column: number): void {
+    const k = key(sheet, row, column, sheet);
+    if (this.formulas.has(k)) this.markDirty(k);
+    const bucket = this.rangesBySheet.get(sheet);
+    if (bucket) {
+      for (const [ownerKey, ranges] of bucket) {
+        if (ownerKey === k) continue;
+        if (ranges.some((range) => withinRange(range, row, column))) {
+          this.markDirty(ownerKey);
+        }
+      }
+    }
+    for (const opaqueKey of this.opaqueFormulas) {
+      if (opaqueKey !== k) this.markDirty(opaqueKey);
+    }
   }
 
   /** Recalculate the formula at the cell, resolving refs through `getRaw` and registered formulas. */
@@ -174,14 +362,22 @@ export class DependencyGraph {
     return this.evaluateWithDependents(k, getRaw, new Set());
   }
 
-  private buildContext(getRaw: RawValueResolver, visited: Set<string>, sheet?: string): EvalContext {
+  private buildContext(
+    getRaw: RawValueResolver,
+    done: Set<string>,
+    sheet?: string,
+    currentRow = 0,
+    currentColumn = 0,
+  ): EvalContext {
     const ownerSheet = sheet ?? this.currentSheet;
     return {
       currentSheet: ownerSheet,
+      currentRow,
+      currentColumn,
       getCellValue: (s, r, c) => {
         const k = key(s, r, c, ownerSheet);
         const entry = this.formulas.get(k);
-        if (entry?.formula) return this.evaluate(k, getRaw, visited);
+        if (entry?.formula) return this.evaluate(k, getRaw, done);
         return getRaw(s ?? ownerSheet, r, c);
       },
       resolveName: (name) => {
@@ -193,19 +389,25 @@ export class DependencyGraph {
         return ERR.NAME();
       },
       resolveTable: (table, column, item) => {
-        if (this.tableResolver) return this.tableResolver(table, column, item);
+        if (this.tableResolver) {
+          return this.tableResolver(table, column, item, {
+            sheet: ownerSheet,
+            row: currentRow,
+            column: currentColumn,
+          });
+        }
         return ERR.NAME();
       },
     };
   }
 
-  private evaluateWithDependents(k: string, getRaw: RawValueResolver, visited: Set<string>): RuntimeValue {
-    const value = this.evaluate(k, getRaw, visited);
+  private evaluateWithDependents(k: string, getRaw: RawValueResolver, done: Set<string>): RuntimeValue {
+    const value = this.evaluate(k, getRaw, done);
     const entry = this.formulas.get(k);
     if (entry) {
       for (const d of entry.dependents) {
-        if (!visited.has(d)) {
-          this.evaluateWithDependents(d, getRaw, visited);
+        if (!done.has(d)) {
+          this.evaluateWithDependents(d, getRaw, done);
         }
       }
     }
@@ -214,6 +416,16 @@ export class DependencyGraph {
 
   /** Evaluate an AST node in a context. */
   evaluateNode(node: AstNode, ctx: EvalContext): RuntimeValue {
+    if (this.depth >= this.maxDepth) throw ERR.CALC();
+    this.depth += 1;
+    try {
+      return this.evaluateNodeInner(node, ctx);
+    } finally {
+      this.depth -= 1;
+    }
+  }
+
+  private evaluateNodeInner(node: AstNode, ctx: EvalContext): RuntimeValue {
     switch (node.kind) {
       case 'number':
         return node.value;
@@ -233,7 +445,11 @@ export class DependencyGraph {
         return ctx.resolveName ? ctx.resolveName(node.name) : ERR.NAME();
       case 'structured':
         return ctx.resolveTable
-          ? ctx.resolveTable(node.table, node.column, node.item)
+          ? ctx.resolveTable(node.table, node.column, node.item, {
+              sheet: ctx.currentSheet ?? '',
+              row: ctx.currentRow ?? 0,
+              column: ctx.currentColumn ?? 0,
+            })
           : ERR.NAME();
       case 'unary': {
         const v = this.evaluateNode(node.operand, ctx);
@@ -361,6 +577,11 @@ export class DependencyGraph {
     if (node.kind === 'ref') {
       return { kind: 'matrix', rows: 1, columns: 1, values: [[ctx.getCellValue(node.sheet ?? ctx.currentSheet, node.row, node.column)]] };
     }
+    const rows = node.end.row - node.start.row + 1;
+    const columns = node.end.column - node.start.column + 1;
+    if (rows > 0 && columns > 0 && rows * columns > this.maxRangeCells) {
+      throw ERR.CALC();
+    }
     const values: RuntimeValue[][] = [];
     for (let r = node.start.row; r <= node.end.row; r++) {
       const row: RuntimeValue[] = [];
@@ -428,6 +649,10 @@ export class DependencyGraph {
   /** Remove all formula registrations (used before bulk re-registration). */
   clear(): void {
     this.formulas.clear();
+    this.rangesBySheet.clear();
+    this.dirty.clear();
+    this.opaqueFormulas.clear();
+    this.depth = 0;
   }
 
   cachedValue(sheet: string, row: number, column: number): RuntimeValue {
@@ -439,6 +664,13 @@ export class DependencyGraph {
     for (const e of this.formulas.values()) if (e.formula) count += 1;
     return count;
   }
+}
+
+function withinRange(range: RangeDep, row: number, column: number): boolean {
+  return (
+    row >= range.top && row <= range.bottom &&
+    column >= range.left && column <= range.right
+  );
 }
 
 function stringify(v: RuntimeValue): string {

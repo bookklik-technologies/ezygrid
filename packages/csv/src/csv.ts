@@ -16,13 +16,44 @@ export interface CsvParseResult {
 
 const CANDIDATES = [',', ';', '\t', '|'];
 
-/** Detect the most likely delimiter from the first non-empty line. */
+/**
+ * Detect the most likely delimiter (F23): a quote-aware scan counts
+ * separators only OUTSIDE quoted fields and correctly traverses quoted
+ * multiline fields instead of assuming a single physical line.
+ */
 export function detectDelimiter(text: string): string {
-  const line = text.split(/\r?\n/).find((l) => l.trim() !== '') ?? '';
+  const counts = new Map<string, number>(CANDIDATES.map((candidate) => [candidate, 0]));
+  let inQuotes = false;
+  let i = 0;
+  // Scan enough content to see real separators but stay bounded.
+  const maxScan = Math.min(text.length, 64 * 1024);
+  while (i < maxScan) {
+    const ch = text[i]!;
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          i += 2;
+        } else {
+          inQuotes = false;
+          i += 1;
+        }
+      } else {
+        i += 1;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      i += 1;
+      continue;
+    }
+    if (counts.has(ch)) counts.set(ch, counts.get(ch)! + 1);
+    i += 1;
+  }
   let best = ',';
   let bestCount = 0;
   for (const candidate of CANDIDATES) {
-    const count = line.split(candidate).length - 1;
+    const count = counts.get(candidate) ?? 0;
     if (count > bestCount) {
       best = candidate;
       bestCount = count;

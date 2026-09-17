@@ -11,9 +11,17 @@ export interface EvalContext {
   /** Resolve a defined name to a value. */
   resolveName?(name: string): RuntimeValue;
   /** Resolve a structured table reference (§25). */
-  resolveTable?(table: string, column?: string, item?: boolean): RuntimeValue;
+  resolveTable?(
+    table: string,
+    column: string | undefined,
+    item: boolean | undefined,
+    context: { sheet: string; row: number; column: number },
+  ): RuntimeValue;
   /** Current sheet for unqualified refs. */
   currentSheet?: string;
+  /** Coordinates of the cell being evaluated (for current-row table refs, §25). */
+  currentRow?: number;
+  currentColumn?: number;
 }
 
 function toNumber(v: RuntimeValue): number {
@@ -260,11 +268,6 @@ function matrixFromNode(node: AstNode, ctx: EvalContext): MatrixValue {
     values.push(row);
   }
   return matrix(values);
-}
-
-function matrixFromValue(v: RuntimeValue): MatrixValue {
-  if (v && typeof v === 'object' && (v as MatrixValue).kind === 'matrix') return v as MatrixValue;
-  return matrix([[v]]);
 }
 
 function flattenArgs(args: RuntimeValue[]): RuntimeValue[] {

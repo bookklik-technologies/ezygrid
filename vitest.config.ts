@@ -12,7 +12,9 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['packages/*/tests/**/*.test.ts'],
+    // TSX suites (React) are included; browser-backed files opt in via an
+    // in-file `// @vitest-environment` pragma.
+    include: ['packages/*/tests/**/*.test.{ts,tsx}'],
     environment: 'node',
   },
 });

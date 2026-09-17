@@ -93,7 +93,6 @@ function rowsHtml(
     const cells: string[] = [];
     for (let c = used.left; c <= used.right; c++) {
       const value = sheet.getValue(r, c);
-      const mask = sheet.getNumberFormat(r, c);
       const style = sheet.getStyle(r, c);
       const styles: string[] = [];
       if (style?.bold) styles.push('font-weight:bold');

@@ -38,14 +38,20 @@ export interface FromCsvOptions extends ParseCsvOptions {
 export function worksheetFromCsv(worksheet: Worksheet, text: string, options: FromCsvOptions = {}): void {
   const parsed = parseCsv(text, options);
   const anchorRect = options.anchor ? parseRange(options.anchor) : { top: 0, left: 0, bottom: 0, right: 0 };
-  for (let r = 0; r < parsed.rows.length; r++) {
-    const row = parsed.rows[r]!;
-    for (let c = 0; c < row.length; c++) {
-      const value = row[c]!;
-      // Only honor the formula interpretation when the import opts in;
-      // otherwise write literally so "=1+1" stays text.
-      const asFormula = options.formulas === true && typeof value === 'string' && value.startsWith('=');
-      worksheet.setValue(anchorRect.top + r, anchorRect.left + c, value, { literal: !asFormula });
+  // One notification transaction for the whole import: one render pass (F02).
+  worksheet.workbook.beginUpdate();
+  try {
+    for (let r = 0; r < parsed.rows.length; r++) {
+      const row = parsed.rows[r]!;
+      for (let c = 0; c < row.length; c++) {
+        const value = row[c]!;
+        // Only honor the formula interpretation when the import opts in;
+        // otherwise write literally so "=1+1" stays text.
+        const asFormula = options.formulas === true && typeof value === 'string' && value.startsWith('=');
+        worksheet.setValue(anchorRect.top + r, anchorRect.left + c, value, { literal: !asFormula });
+      }
     }
+  } finally {
+    worksheet.workbook.endUpdate();
   }
 }

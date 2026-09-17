@@ -31,6 +31,20 @@ export interface FloatingPosition {
 export const DEFAULT_CHART_COLORS = ['#2563eb', '#16a34a', '#dc2626', '#ca8a04', '#7c3aed', '#0891b2'];
 
 /**
+ * Validate a chart color at the public boundary (F01): only plain CSS color
+ * values are accepted, so a string like `red" onpointerover="alert(1)`
+ * can never reach an SVG attribute.
+ */
+export function sanitizeChartColor(value: string): string | null {
+  if (typeof value !== 'string') return null;
+  const text = value.trim();
+  if (/^#[0-9a-f]{3,8}$/i.test(text)) return text;
+  if (/^[a-z]{1,32}$/i.test(text)) return text.toLowerCase();
+  if (/^(rgb|rgba|hsl|hsla)\(\s*[\d\s.,%/]+\)$/i.test(text)) return text.replace(/\s+/g, ' ');
+  return null;
+}
+
+/**
  * Charts v1 (§31): provider-neutral ChartSpec bound to worksheet ranges,
  * rendered by an internal SVG engine into the media overlay.
  */
@@ -38,7 +52,16 @@ export class ChartEngine {
   private charts: ChartSpec[] = [];
 
   add(spec: Omit<ChartSpec, 'id'>): ChartSpec {
-    const full: ChartSpec = { ...spec, id: createId('chart') };
+    const colors = Array.isArray(spec.colors)
+      ? spec.colors
+          .map((color) => sanitizeChartColor(String(color)))
+          .filter((color): color is string => color !== null)
+      : undefined;
+    const full: ChartSpec = {
+      ...spec,
+      colors: colors && colors.length > 0 ? colors : undefined,
+      id: createId('chart'),
+    };
     this.charts.push(full);
     return full;
   }
@@ -54,7 +77,8 @@ export class ChartEngine {
 
 export interface ChartData {
   categories: string[];
-  series: { name: string; values: number[] }[];
+  /** One value slot per category; null = missing/nonnumeric (F22). */
+  series: { name: string; values: (number | null)[] }[];
 }
 
 /** Read a rectangular range as chart data (first row = headers). */
@@ -69,10 +93,11 @@ export function readChartData(worksheet: Worksheet, spec: ChartSpec): ChartData 
   const series: ChartData['series'] = [];
   for (let c = rect.left + 1; c <= rect.right; c++) {
     const name = headerOffset && worksheet.getValue(rect.top, c);
-    const values: number[] = [];
+    const values: (number | null)[] = [];
     for (let r = rect.top + headerOffset; r <= rect.bottom; r++) {
       const v = worksheet.getValue(r, c);
-      if (typeof v === 'number') values.push(v);
+      // Preserve the slot so values never shift onto the wrong category (F22).
+      values.push(typeof v === 'number' && Number.isFinite(v) ? v : null);
     }
     series.push({ name: name === null || name === undefined ? `Series ${c - rect.left}` : String(name), values });
   }

@@ -26,9 +26,33 @@ export interface CellRecordSnapshot {
   styleId?: number;
 }
 
+/** Per-cell metadata snapshot for `meta.set` (styles/notes/formats/editors, F08). */
+export interface MetaCellSnapshot {
+  row: number;
+  column: number;
+  /** null = absent (delete); a value = set; undefined = leave unchanged. */
+  style?: unknown | null;
+  note?: string | null;
+  format?: string | null;
+  editor?: { type: string; options?: unknown } | null;
+}
+
+export interface MetaSetPayload {
+  cells: MetaCellSnapshot[];
+}
+
+/** Forward: merge `added`, unmerge `removed`. Inverse swaps both (F08). */
+export interface MergesSetPayload {
+  added?: { top: number; left: number; bottom: number; right: number }[];
+  removed?: { top: number; left: number; bottom: number; right: number }[];
+}
+
 export type OperationType =
   | 'cell.set'
   | 'cells.set'
+  | 'cells.replace'
+  | 'meta.set'
+  | 'merges.set'
   | 'rows.insert'
   | 'rows.delete'
   | 'rows.move'
