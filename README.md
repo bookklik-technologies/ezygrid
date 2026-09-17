@@ -1,6 +1,6 @@
 # ezygrid
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![GitHub](https://img.shields.io/badge/GitHub-bookklik--technologies%2Fezygrid-blue.svg)](https://github.com/bookklik-technologies/ezygrid)
 
 Framework-agnostic JavaScript/TypeScript spreadsheet and data-grid library by [Bookklik Technologies](https://github.com/bookklik-technologies).

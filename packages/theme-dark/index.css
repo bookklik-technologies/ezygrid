@@ -3,12 +3,12 @@
 .ezygrid {
   --ezygrid-font-family: system-ui, sans-serif;
   --ezygrid-font-size: 13px;
-  --ezygrid-bg: #18181b;
-  --ezygrid-text: #fafafa;
-  --ezygrid-gridline: #3f3f46;
-  --ezygrid-selection: #60a5fa;
-  --ezygrid-selection-soft: rgba(96, 165, 250, 0.12);
-  --ezygrid-header-bg: #27272a;
-  --ezygrid-header-text: #a1a1aa;
-  --ezygrid-table-band: rgba(255, 255, 255, 0.04);
+  --ezygrid-bg: #0f172a;
+  --ezygrid-text: #e2e8f0;
+  --ezygrid-gridline: #1e293b;
+  --ezygrid-selection: #00ff99;
+  --ezygrid-selection-soft: rgba(0, 255, 153, 0.16);
+  --ezygrid-header-bg: #16223a;
+  --ezygrid-header-text: #94a3b8;
+  --ezygrid-table-band: rgba(0, 255, 153, 0.06);
 }

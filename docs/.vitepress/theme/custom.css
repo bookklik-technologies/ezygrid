@@ -1,0 +1,57 @@
+/* Ezygrid brand palette — primary #00FF99 (mint), secondary #2563EB (blue).
+   Mint ramp: 50 #e6fff4 · 100 #ccffe9 · 300 #4dffbb · 400 #00ff99 (brand)
+              500 #00e58f · 600 #00a86e · 700 #00875a · 900 #0b6b4f
+   Blue ramp: 400 #60a5fa · 500 #3b82f6 · 600 #2563eb · 700 #1d4ed8 · 800 #1e40af
+   Navy bridge (code/hero surfaces): #0b2545 */
+
+:root {
+  --vp-c-brand-1: #00875a;
+  --vp-c-brand-2: #00a86e;
+  --vp-c-brand-3: #00ff99;
+  --vp-c-brand-soft: rgba(0, 255, 153, 0.16);
+
+  --vp-c-sponsor: #2563eb;
+  --vp-c-sponsor-soft: rgba(37, 99, 235, 0.14);
+
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(120deg, #00a86e 0%, #2563eb 100%);
+
+  --vp-button-brand-bg: #00a86e;
+  --vp-button-brand-text: #ffffff;
+  --vp-button-brand-hover-bg: #00c47a;
+  --vp-button-brand-hover-text: #ffffff;
+  --vp-button-brand-active-bg: #00875a;
+  --vp-button-brand-active-text: #ffffff;
+
+  --vp-button-alt-bg: #2563eb;
+  --vp-button-alt-text: #ffffff;
+  --vp-button-alt-hover-bg: #1d4ed8;
+  --vp-button-alt-hover-text: #ffffff;
+  --vp-button-alt-active-bg: #1e40af;
+  --vp-button-alt-active-text: #ffffff;
+}
+
+.dark {
+  --vp-c-brand-1: #4dffbb;
+  --vp-c-brand-2: #00ff99;
+  --vp-c-brand-3: #00ff99;
+  --vp-c-brand-soft: rgba(0, 255, 153, 0.16);
+
+  --vp-c-sponsor: #60a5fa;
+  --vp-c-sponsor-soft: rgba(37, 99, 235, 0.24);
+}
+
+/* Dark mode code surfaces use the navy bridge */
+.dark {
+  --vp-code-block-bg: #0f172a;
+}
+
+/* Custom blocks (tip/warning) tinted with brand hues */
+.custom-block.tip {
+  border-color: var(--vp-c-brand-soft);
+}
+
+html {
+  --vp-c-accent: var(--vp-c-brand-1);
+  --vp-c-accent-hover: var(--vp-c-brand-2);
+}

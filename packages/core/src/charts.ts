@@ -28,7 +28,7 @@ export interface FloatingPosition {
   height?: number;
 }
 
-export const DEFAULT_CHART_COLORS = ['#2563eb', '#16a34a', '#dc2626', '#ca8a04', '#7c3aed', '#0891b2'];
+export const DEFAULT_CHART_COLORS = ['#2563eb', '#00b374', '#0ea5e9', '#00ff99', '#1e40af', '#00875a'];
 
 /**
  * Validate a chart color at the public boundary (F01): only plain CSS color

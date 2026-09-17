@@ -15,13 +15,13 @@ export const defaultThemeTokens: ThemeTokens = {
   fontFamily: 'system-ui, sans-serif',
   fontSize: '13px',
   bg: '#ffffff',
-  text: '#111111',
-  gridline: '#e4e4e7',
-  selection: '#2563eb',
-  selectionSoft: 'rgba(37, 99, 235, 0.08)',
-  headerBg: '#f4f4f5',
-  headerText: '#52525b',
-  tableBand: 'rgba(0, 0, 0, 0.03)',
+  text: '#0f172a',
+  gridline: '#e2e8f0',
+  selection: '#00c47a',
+  selectionSoft: 'rgba(0, 196, 122, 0.12)',
+  headerBg: '#e6fff4',
+  headerText: '#00674a',
+  tableBand: 'rgba(0, 196, 122, 0.06)',
 };
 
 const VARIABLE_MAP: Record<keyof ThemeTokens, string> = {
@@ -50,22 +50,22 @@ export function buildThemeCss(overrides: Partial<ThemeTokens> = {}): string {
 }
 
 export const darkThemeTokens: Partial<ThemeTokens> = {
-  bg: '#18181b',
-  text: '#fafafa',
-  gridline: '#3f3f46',
-  selection: '#60a5fa',
-  selectionSoft: 'rgba(96, 165, 250, 0.12)',
-  headerBg: '#27272a',
-  headerText: '#a1a1aa',
-  tableBand: 'rgba(255, 255, 255, 0.04)',
+  bg: '#0f172a',
+  text: '#e2e8f0',
+  gridline: '#1e293b',
+  selection: '#00ff99',
+  selectionSoft: 'rgba(0, 255, 153, 0.16)',
+  headerBg: '#16223a',
+  headerText: '#94a3b8',
+  tableBand: 'rgba(0, 255, 153, 0.06)',
 };
 
 export const highContrastThemeTokens: Partial<ThemeTokens> = {
   bg: '#ffffff',
   text: '#000000',
   gridline: '#000000',
-  selection: '#0000ff',
-  selectionSoft: 'rgba(0, 0, 255, 0.15)',
+  selection: '#00875a',
+  selectionSoft: 'rgba(0, 135, 90, 0.2)',
   headerBg: '#e5e5e5',
   headerText: '#000000',
 };

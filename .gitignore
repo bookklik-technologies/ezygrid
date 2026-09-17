@@ -3,3 +3,6 @@ dist
 *.tsbuildinfo
 coverage
 .pnpm-store
+# VitePress
+docs/.vitepress/dist/
+docs/.vitepress/cache/

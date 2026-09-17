@@ -12,7 +12,7 @@ ExampleUI.ready(() => {
   });
   const sheet = editor.workbook.activeWorksheet;
   sheet.columnSizes.setSize(1, 130);
-  sheet.setStyle('A1:E1', { bold: true, background: '#edf3e7' });
+  sheet.setStyle('A1:E1', { bold: true, background: '#e6fff4' });
   sheet.setNumberFormat('D2:D5', '#,##0.00');
   sheet.addValidation({ range: 'C2:C50', type: 'number', action: 'reject', min: 0, max: 1000, message: 'Quantity must be between 0 and 1,000.' });
   sheet.addValidation({ range: 'E2:E50', type: 'list', action: 'reject', values: ['in stock', 'low', 'out'] });
@@ -21,7 +21,7 @@ ExampleUI.ready(() => {
   sheet.addTable({ name: 'InventoryTable', range: 'A1:E5' });
   const chartOptions = { type: 'column', source: 'B1:C5', firstRowIsHeader: true, anchor: { row: 7, column: 0 }, width: 440, height: 230, title: 'Units in stock' };
   let chartId = sheet.addChart(chartOptions);
-  sheet.addShape({ shape: 'textbox', text: 'Quantities accept 0–1,000. Edit the cells above.', anchor: { row: 19, column: 0 }, width: 440, height: 32, fill: '#edf3e7', stroke: '#dce5df' });
+  sheet.addShape({ shape: 'textbox', text: 'Quantities accept 0–1,000. Edit the cells above.', anchor: { row: 19, column: 0 }, width: 440, height: 32, fill: '#e6fff4', stroke: '#d8e2ec' });
   editor.renderer.render();
 
   function refresh() {

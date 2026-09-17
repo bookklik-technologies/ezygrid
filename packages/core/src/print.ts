@@ -70,7 +70,7 @@ export function buildPrintHtml(workbook: Workbook, sheetName: string, options: P
 body { font-family: system-ui, sans-serif; font-size: 11px; margin: 0; }
 table { border-collapse: collapse; table-layout: fixed; width: 100%; }
 td { padding: 2px 6px; overflow: hidden; white-space: nowrap; }
-${gridlines ? 'td { border: 1px solid #e4e4e7; }' : 'td { border: none; }'}
+${gridlines ? 'td { border: 1px solid #e2e8f0; }' : 'td { border: none; }'}
 thead td { font-weight: bold; }
 </style>
 </head>

@@ -24065,7 +24065,11 @@
     n;
     tree;
     defaultSize;
+    /** Indexes whose size differs from `defaultSize` (sparse, for snapshotting). */
+    overrides = /* @__PURE__ */ new Map();
     constructor(logicalSize, defaultSize) {
+      validateCount(logicalSize, "logicalSize");
+      validateSize(defaultSize, "defaultSize");
       this.n = logicalSize;
       this.defaultSize = defaultSize;
       this.tree = new Float64Array(this.n + 1);
@@ -24080,8 +24084,13 @@
     }
     /** Total pixel size of the first `count` items. */
     prefixSum(count) {
+      let clamped = count;
+      if (!Number.isFinite(clamped)) clamped = clamped > 0 ? this.n : 0;
+      clamped = Math.floor(clamped);
+      if (clamped < 0) clamped = 0;
+      if (clamped > this.n) clamped = this.n;
       let sum = 0;
-      for (let i = Math.min(count, this.n); i > 0; i -= i & -i) sum += this.tree[i];
+      for (let i = clamped; i > 0; i -= i & -i) sum += this.tree[i];
       return sum;
     }
     totalSize() {
@@ -24089,21 +24098,35 @@
     }
     /** Pixel offset of item `index` (0-based). */
     offsetOf(index) {
+      this.assertIndex(index, "index");
       return this.prefixSum(index);
     }
     /** Update the size of item `index` (0-based) to `size`. */
     setSize(index, size) {
+      this.assertIndex(index, "index");
+      validateSize(size, "size");
       const current = this.sizeOf(index);
       const delta = size - current;
       for (let i = index + 1; i <= this.n; i += i & -i) {
         this.tree[i] = (this.tree[i] ?? 0) + delta;
       }
+      if (size === this.defaultSize) this.overrides.delete(index);
+      else this.overrides.set(index, size);
+    }
+    /** Custom sizes only: index -> size (sparse; excludes the default size). */
+    getCustomSizes() {
+      return this.overrides;
     }
     sizeOf(index) {
+      this.assertIndex(index, "index");
       return this.prefixSum(index + 1) - this.prefixSum(index);
     }
     /** Largest index whose start offset is <= pixel, i.e. index containing `pixel`. */
     indexAt(pixel) {
+      if (this.n === 0) return 0;
+      if (!Number.isFinite(pixel)) {
+        return pixel > 0 ? this.n - 1 : 0;
+      }
       let pos = 0;
       let rem = pixel;
       const highest = 2 ** Math.floor(Math.log2(this.n));
@@ -24116,7 +24139,24 @@
       }
       return Math.max(0, Math.min(this.n - 1, pos));
     }
+    assertIndex(index, label) {
+      if (!Number.isInteger(index) || index < 0 || index >= this.n) {
+        throw new RangeError(
+          `SizeIndex: ${label} must be an integer within [0, ${this.n - 1}], got ${index}`
+        );
+      }
+    }
   };
+  function validateSize(value, label) {
+    if (!Number.isFinite(value) || value < 0) {
+      throw new RangeError(`SizeIndex: ${label} must be a finite non-negative number, got ${value}`);
+    }
+  }
+  function validateCount(value, label) {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new RangeError(`SizeIndex: ${label} must be a non-negative integer, got ${value}`);
+    }
+  }
 
   // packages/model/src/operations.ts
   var op = (workbookId, type, payload, worksheetId, actorId) => ({
@@ -24135,23 +24175,51 @@
     redoStack = [];
     limit;
     batching = 0;
+    pending = null;
+    /**
+     * The entry currently being replayed by undo/redo. Structural ops inside
+     * its own replay trigger transforms that must NOT touch it: its remaining
+     * payloads are expressed in the geometry its earlier ops just restored,
+     * and shifting them mid-replay corrupts the restore (F07).
+     */
+    excluded = null;
     constructor(limit = 500) {
       this.limit = limit;
     }
+    /** Mark the entry being replayed so transforms skip it (F07). */
+    setTransformExclusion(entry) {
+      this.excluded = entry;
+    }
     push(operation, inverse) {
       if (this.batching > 0) {
-        this.undoStack.push(operation);
+        if (!this.pending) {
+          this.redoStack.length = 0;
+          this.pending = { forward: [], inverse: [] };
+          this.undoStack.push(this.pending);
+          this.trimUndo();
+        }
+        this.pending.forward.push(operation);
+        for (const i of Array.isArray(inverse) ? inverse : inverse ? [inverse] : []) {
+          this.pending.inverse.push(i);
+        }
         return;
       }
-      this.undoStack.push(operation);
-      if (this.undoStack.length > this.limit) this.undoStack.shift();
+      this.undoStack.push({
+        forward: [operation],
+        inverse: Array.isArray(inverse) ? [...inverse] : inverse ? [inverse] : []
+      });
+      this.trimUndo();
       this.redoStack.length = 0;
+    }
+    trimUndo() {
+      while (this.undoStack.length > this.limit) this.undoStack.shift();
     }
     beginBatch() {
       this.batching += 1;
     }
     endBatch() {
       this.batching = Math.max(0, this.batching - 1);
+      if (this.batching === 0) this.pending = null;
     }
     get canUndo() {
       return this.undoStack.length > 0;
@@ -24160,42 +24228,107 @@
       return this.redoStack.length > 0;
     }
     popUndo() {
-      const op2 = this.undoStack.pop();
-      if (op2) this.redoStack.push(op2);
-      return op2;
+      const entry = this.undoStack.pop();
+      if (entry) this.redoStack.push(entry);
+      return entry;
     }
     popRedo() {
-      const op2 = this.redoStack.pop();
-      if (op2) this.undoStack.push(op2);
-      return op2;
+      const entry = this.redoStack.pop();
+      if (entry) this.undoStack.push(entry);
+      return entry;
     }
     clear() {
       this.undoStack.length = 0;
       this.redoStack.length = 0;
+      this.pending = null;
     }
     /**
-     * Transform the coordinates of stored cell operations after a structural
-     * edit (row/column insert/delete). `mapper` maps (row, column) to the new
-     * coordinates, or undefined when the target was deleted (the operation is
-     * then dropped from history). Applies to both stacks.
+     * Transform stored operations after a structural edit (row/column
+     * insert/delete). Cell coordinates of entries targeting `sheetId` are
+     * remapped (dropped when deleted), and every stored formula is rewritten
+     * through `rewriter` when its references point at the changed sheet,
+     * across both stacks and both forward/inverse payloads.
      */
-    transformCells(sheetId, mapper) {
-      const apply = (stack) => {
-        for (let i = stack.length - 1; i >= 0; i--) {
-          const operation = stack[i];
-          if (operation.type !== "cell.set" || operation.worksheetId !== sheetId) continue;
-          const payload = operation.payload;
-          const mapped = mapper(payload.row, payload.column);
-          if (!mapped) {
-            stack.splice(i, 1);
-            continue;
+    transformCells(sheetId, mapper, rewriter, rangeMapper) {
+      const apply = (entry) => {
+        if (entry === this.excluded) return;
+        for (const operations of [entry.forward, entry.inverse]) {
+          for (let i = operations.length - 1; i >= 0; i--) {
+            const operation = operations[i];
+            if (rewriter) this.rewriteFormulas(operation, rewriter);
+            if (rangeMapper && operation.type === "merges.set") {
+              this.mapOperationRanges(operation, rangeMapper);
+            }
+            if (operation.worksheetId !== sheetId) continue;
+            const dropped = this.mapOperationCells(operation, mapper);
+            if (dropped) operations.splice(i, 1);
           }
-          payload.row = mapped.row;
-          payload.column = mapped.column;
+        }
+        if (entry.forward.length === 0 && entry.inverse.length === 0) {
+          const index = this.undoStack.indexOf(entry);
+          if (index >= 0) this.undoStack.splice(index, 1);
+          const redoIndex = this.redoStack.indexOf(entry);
+          if (redoIndex >= 0) this.redoStack.splice(redoIndex, 1);
         }
       };
-      apply(this.undoStack);
-      apply(this.redoStack);
+      for (const entry of [...this.undoStack, ...this.redoStack]) apply(entry);
+    }
+    rewriteFormulas(operation, rewriter) {
+      const payloads = [operation.payload];
+      if (operation.type === "cells.replace" || operation.type === "cells.set") {
+        const cells = operation.payload.cells;
+        if (Array.isArray(cells)) payloads.push(...cells);
+      }
+      for (const payload of payloads) {
+        if (payload === null || typeof payload !== "object") continue;
+        const record = payload;
+        if (typeof record.formula === "string") {
+          record.formula = rewriter(record.formula, operation.worksheetId);
+        }
+        if (record.previous && typeof record.previous.formula === "string") {
+          record.previous.formula = rewriter(record.previous.formula, operation.worksheetId);
+        }
+      }
+    }
+    /** Remap coordinates of a single operation. Returns true when it must be dropped. */
+    mapOperationCells(operation, mapper) {
+      const payload = operation.payload;
+      if (typeof payload.row === "number" && typeof payload.column === "number") {
+        const mapped = mapper(payload.row, payload.column);
+        if (!mapped) return true;
+        payload.row = mapped.row;
+        payload.column = mapped.column;
+        return false;
+      }
+      if (Array.isArray(payload.cells)) {
+        const kept = [];
+        for (const cell of payload.cells) {
+          const mapped = mapper(cell.row, cell.column);
+          if (mapped) {
+            cell.row = mapped.row;
+            cell.column = mapped.column;
+            kept.push(cell);
+          }
+        }
+        payload.cells = kept;
+        return payload.cells.length === 0;
+      }
+      return false;
+    }
+    /** Remap stored merge ranges after a structural edit (F08). */
+    mapOperationRanges(operation, rangeMapper) {
+      const payload = operation.payload;
+      const map = (list) => {
+        if (!list) return void 0;
+        const kept = [];
+        for (const rect of list) {
+          const mapped = rangeMapper(rect);
+          if (mapped) kept.push(mapped);
+        }
+        return kept;
+      };
+      payload.added = map(payload.added);
+      payload.removed = map(payload.removed);
     }
   };
 
@@ -24297,6 +24430,30 @@
       const bang = t.text.lastIndexOf("!");
       const applies = bang >= 0 ? unquoteSheet(t.text.slice(0, bang)) === options.targetSheet : options.ownerSheet === options.targetSheet;
       out += applies ? transformRefToken(t.text, shift) ?? "#REF!" : t.text;
+    }
+    return out;
+  }
+  function renameSheetRefs(formula, from, to) {
+    if (!from || from === to) return formula;
+    const tokens = tokenizeFormula(formula);
+    let out = "";
+    for (const token of tokens) {
+      if (!token.isRef) {
+        out += token.text;
+        continue;
+      }
+      const bang = token.text.lastIndexOf("!");
+      if (bang < 0) {
+        out += token.text;
+        continue;
+      }
+      const qualifier = unquoteSheet(token.text.slice(0, bang));
+      if (qualifier === from) {
+        const quoted = /[\s'!]/.test(to) ? `'${to.replace(/'/g, "''")}'` : to;
+        out += `${quoted}!${token.text.slice(bang + 1)}`;
+      } else {
+        out += token.text;
+      }
     }
     return out;
   }
@@ -24646,32 +24803,30 @@
       throw new Error(`Unexpected token ${t.type} "${t.text}"`);
     }
   };
-  function collectRefs(node, out = []) {
+  function collectDependencies(node, out = { refs: [], ranges: [] }) {
     switch (node.kind) {
       case "ref":
-        out.push({ sheet: node.sheet, row: node.row, column: node.column });
+        out.refs.push({ sheet: node.sheet, row: node.row, column: node.column });
         break;
       case "range":
-        for (let r = node.start.row; r <= node.end.row; r++) {
-          for (let c = node.start.column; c <= node.end.column; c++) {
-            out.push({ sheet: node.sheet, row: r, column: c });
-          }
-        }
+        out.ranges.push({ sheet: node.sheet, start: { ...node.start }, end: { ...node.end } });
         break;
       case "structured":
+        out.opaque = true;
+        break;
+      case "name":
+        out.opaque = true;
         break;
       case "unary":
-        collectRefs(node.operand, out);
-        break;
       case "percent":
-        collectRefs(node.operand, out);
+        collectDependencies(node.operand, out);
         break;
       case "binary":
-        collectRefs(node.left, out);
-        collectRefs(node.right, out);
+        collectDependencies(node.left, out);
+        collectDependencies(node.right, out);
         break;
       case "call":
-        for (const a of node.args) collectRefs(a, out);
+        for (const a of node.args) collectDependencies(a, out);
         break;
       default:
         break;
@@ -25644,12 +25799,30 @@
     const [row, column] = k.slice(bang + 1).split(",");
     return [sheet, Number(row), Number(column)];
   }
+  var DEFAULT_MAX_RANGE_CELLS = 2e6;
+  var DEFAULT_MAX_DEPTH = 1e3;
   var DependencyGraph = class _DependencyGraph {
     formulas = /* @__PURE__ */ new Map();
+    /** sheet -> formulaKey -> range dependencies registered by that formula. */
+    rangesBySheet = /* @__PURE__ */ new Map();
     currentSheet = "";
     namesResolver;
     tableResolver;
     letScopes = [];
+    depth = 0;
+    maxRangeCells;
+    maxDepth;
+    /**
+     * Cells whose cached value is stale (F02): the entry itself or one of its
+     * transitive precedents changed. Evaluation recomputes exactly these.
+     */
+    dirty = /* @__PURE__ */ new Set();
+    /** Formulas with opaque (name/table) dependencies, workbook-wide. */
+    opaqueFormulas = /* @__PURE__ */ new Set();
+    constructor(budgets = {}) {
+      this.maxRangeCells = budgets.maxRangeCells ?? DEFAULT_MAX_RANGE_CELLS;
+      this.maxDepth = budgets.maxDepth ?? DEFAULT_MAX_DEPTH;
+    }
     setCurrentSheet(sheet) {
       this.currentSheet = sheet;
     }
@@ -25667,17 +25840,26 @@
     /** Register or update a formula at the given cell. */
     setFormula(sheet, row, column, formula, ast) {
       const k = key(sheet, row, column, sheet);
-      const refs = collectRefs(ast).map((r) => ({
+      const deps = collectDependencies(ast);
+      const refs = deps.refs.map((r) => ({
         sheet: r.sheet ?? sheet,
         row: r.row,
         column: r.column
       }));
       const refKeys = refs.map((r) => key(r.sheet, r.row, r.column, sheet));
+      const rangeDeps = deps.ranges.map((r) => ({
+        sheet: r.sheet ?? sheet,
+        top: Math.min(r.start.row, r.end.row),
+        left: Math.min(r.start.column, r.end.column),
+        bottom: Math.max(r.start.row, r.end.row),
+        right: Math.max(r.start.column, r.end.column)
+      }));
       const existing = this.formulas.get(k);
       if (existing) {
         for (const p of existing.precedents) {
           this.formulas.get(p)?.dependents.delete(k);
         }
+        this.unregisterRanges(k, existing.sheet);
       }
       const entry = {
         sheet,
@@ -25686,9 +25868,13 @@
         value: null,
         dependents: existing?.dependents ?? /* @__PURE__ */ new Set(),
         precedents: new Set(refKeys),
-        evaluating: false
+        ranges: rangeDeps,
+        evaluating: false,
+        opaqueDeps: deps.opaque === true
       };
       this.formulas.set(k, entry);
+      if (deps.opaque === true) this.opaqueFormulas.add(k);
+      else this.opaqueFormulas.delete(k);
       for (const p of refKeys) {
         this.formulas.get(p)?.dependents.add(k);
         if (!this.formulas.has(p)) {
@@ -25700,9 +25886,28 @@
             value: null,
             dependents: /* @__PURE__ */ new Set([k]),
             precedents: /* @__PURE__ */ new Set(),
+            ranges: [],
             evaluating: false
           });
         }
+      }
+      const sheetRanges = this.rangesBySheet.get(sheet);
+      if (sheetRanges) {
+        for (const [ownerKey, ownerRanges] of sheetRanges) {
+          if (ownerKey === k) continue;
+          if (ownerRanges.some((range) => withinRange(range, row, column))) {
+            this.formulas.get(ownerKey)?.dependents.add(k);
+            entry.precedents.add(ownerKey);
+          }
+        }
+      }
+      if (rangeDeps.length > 0) {
+        let bucket = this.rangesBySheet.get(sheet);
+        if (!bucket) {
+          bucket = /* @__PURE__ */ new Map();
+          this.rangesBySheet.set(sheet, bucket);
+        }
+        bucket.set(k, rangeDeps);
       }
       this.markDirty(k);
     }
@@ -25713,37 +25918,129 @@
       for (const p of entry.precedents) {
         this.formulas.get(p)?.dependents.delete(k);
       }
+      this.unregisterRanges(k, sheet);
+      this.opaqueFormulas.delete(k);
       if (entry.formula) {
         if (entry.dependents.size > 0) {
           entry.formula = "";
           entry.ast = { kind: "number", value: 0 };
           entry.value = null;
           entry.evaluating = false;
+          entry.ranges = [];
+          entry.opaqueDeps = false;
           this.markDirty(k);
           return;
         }
         this.formulas.delete(k);
       }
+      this.dirty.delete(k);
     }
-    /** Recalculate the formula at k and all transitive dependents. */
-    evaluate(k, getRaw, visited) {
-      visited.add(k);
+    /** Remove every registration of a removed worksheet so its formulas can never evaluate again (F11). */
+    removeSheet(sheet) {
+      const doomed = [];
+      for (const [k, entry] of this.formulas) {
+        if (entry.sheet === sheet) doomed.push(k);
+      }
+      for (const k of doomed) {
+        const entry = this.formulas.get(k);
+        if (!entry) continue;
+        for (const p of entry.precedents) {
+          this.formulas.get(p)?.dependents.delete(k);
+        }
+        for (const d of entry.dependents) {
+          this.formulas.get(d)?.precedents.delete(k);
+        }
+        this.unregisterRanges(k, entry.sheet);
+        this.opaqueFormulas.delete(k);
+        this.dirty.delete(k);
+        this.formulas.delete(k);
+      }
+      this.rangesBySheet.delete(sheet);
+    }
+    unregisterRanges(k, sheet) {
+      const bucket = this.rangesBySheet.get(sheet);
+      if (!bucket) return;
+      bucket.delete(k);
+      if (bucket.size === 0) this.rangesBySheet.delete(sheet);
+    }
+    /**
+     * Recalculate the formula at k and all transitive dependents. The `done`
+     * set memoizes every formula computed during this pass so shared
+     * dependency branches evaluate exactly once (F02).
+     */
+    evaluate(k, getRaw, done) {
       const entry = this.formulas.get(k);
       if (!entry) return null;
+      if (done.has(k)) return entry.value;
       if (entry.evaluating) throw ERR.CIRCULAR();
       if (!entry.formula) return entry.value;
+      if (!this.dirty.has(k)) {
+        done.add(k);
+        return entry.value;
+      }
       entry.evaluating = true;
       try {
-        const value = this.evaluateNode(entry.ast, this.buildContext(getRaw, visited, entry.sheet));
+        const [, entryRow, entryColumn] = splitKey(k);
+        const value = this.evaluateNode(
+          entry.ast,
+          this.buildContext(getRaw, done, entry.sheet, entryRow, entryColumn)
+        );
         entry.value = value;
       } catch (e) {
         entry.value = e instanceof FormulaError ? e : ERR.VALUE();
       } finally {
         entry.evaluating = false;
+        done.add(k);
+        this.dirty.delete(k);
       }
       return entry.value;
     }
+    /**
+     * Mark the entry at `k` and its whole transitive dependent subgraph dirty
+     * (F02): any of them may read the changed value on their next evaluation.
+     * The visited set is separate from `dirty`: placeholder entries never
+     * evaluate (so never clear their dirty flag) and must not stop the walk.
+     */
     markDirty(k) {
+      const visited = /* @__PURE__ */ new Set();
+      const stack = [k];
+      while (stack.length > 0) {
+        const current = stack.pop();
+        if (visited.has(current)) continue;
+        visited.add(current);
+        this.dirty.add(current);
+        const entry = this.formulas.get(current);
+        if (entry) for (const dependent of entry.dependents) stack.push(dependent);
+      }
+    }
+    /**
+     * Invalidate every formula with opaque (name/table) dependencies (F02):
+     * defined names and table definitions are resolved dynamically, so their
+     * add/remove/redefinition can change any of these formulas' results.
+     */
+    invalidateOpaqueFormulas() {
+      for (const k of this.opaqueFormulas) this.markDirty(k);
+    }
+    /**
+     * Notify the graph that a raw (non-formula) value changed at the cell, so
+     * dependents and range/structured readers recompute (F02). Formulas whose
+     * dependencies are opaque (names/tables) are invalidated workbook-wide.
+     */
+    notifyCellChange(sheet, row, column) {
+      const k = key(sheet, row, column, sheet);
+      if (this.formulas.has(k)) this.markDirty(k);
+      const bucket = this.rangesBySheet.get(sheet);
+      if (bucket) {
+        for (const [ownerKey, ranges] of bucket) {
+          if (ownerKey === k) continue;
+          if (ranges.some((range) => withinRange(range, row, column))) {
+            this.markDirty(ownerKey);
+          }
+        }
+      }
+      for (const opaqueKey of this.opaqueFormulas) {
+        if (opaqueKey !== k) this.markDirty(opaqueKey);
+      }
     }
     /** Recalculate the formula at the cell, resolving refs through `getRaw` and registered formulas. */
     recalculate(sheet, row, column, getRaw) {
@@ -25751,14 +26048,16 @@
       const k = key(sheet, row, column, sheet);
       return this.evaluateWithDependents(k, getRaw, /* @__PURE__ */ new Set());
     }
-    buildContext(getRaw, visited, sheet) {
+    buildContext(getRaw, done, sheet, currentRow = 0, currentColumn = 0) {
       const ownerSheet = sheet ?? this.currentSheet;
       return {
         currentSheet: ownerSheet,
+        currentRow,
+        currentColumn,
         getCellValue: (s, r, c) => {
           const k = key(s, r, c, ownerSheet);
           const entry = this.formulas.get(k);
-          if (entry?.formula) return this.evaluate(k, getRaw, visited);
+          if (entry?.formula) return this.evaluate(k, getRaw, done);
           return getRaw(s ?? ownerSheet, r, c);
         },
         resolveName: (name) => {
@@ -25770,18 +26069,24 @@
           return ERR.NAME();
         },
         resolveTable: (table, column, item) => {
-          if (this.tableResolver) return this.tableResolver(table, column, item);
+          if (this.tableResolver) {
+            return this.tableResolver(table, column, item, {
+              sheet: ownerSheet,
+              row: currentRow,
+              column: currentColumn
+            });
+          }
           return ERR.NAME();
         }
       };
     }
-    evaluateWithDependents(k, getRaw, visited) {
-      const value = this.evaluate(k, getRaw, visited);
+    evaluateWithDependents(k, getRaw, done) {
+      const value = this.evaluate(k, getRaw, done);
       const entry = this.formulas.get(k);
       if (entry) {
         for (const d of entry.dependents) {
-          if (!visited.has(d)) {
-            this.evaluateWithDependents(d, getRaw, visited);
+          if (!done.has(d)) {
+            this.evaluateWithDependents(d, getRaw, done);
           }
         }
       }
@@ -25789,6 +26094,15 @@
     }
     /** Evaluate an AST node in a context. */
     evaluateNode(node, ctx) {
+      if (this.depth >= this.maxDepth) throw ERR.CALC();
+      this.depth += 1;
+      try {
+        return this.evaluateNodeInner(node, ctx);
+      } finally {
+        this.depth -= 1;
+      }
+    }
+    evaluateNodeInner(node, ctx) {
       switch (node.kind) {
         case "number":
           return node.value;
@@ -25806,7 +26120,11 @@
         case "name":
           return ctx.resolveName ? ctx.resolveName(node.name) : ERR.NAME();
         case "structured":
-          return ctx.resolveTable ? ctx.resolveTable(node.table, node.column, node.item) : ERR.NAME();
+          return ctx.resolveTable ? ctx.resolveTable(node.table, node.column, node.item, {
+            sheet: ctx.currentSheet ?? "",
+            row: ctx.currentRow ?? 0,
+            column: ctx.currentColumn ?? 0
+          }) : ERR.NAME();
         case "unary": {
           const v = this.evaluateNode(node.operand, ctx);
           const n = typeof v === "number" ? v : Number(v ?? 0);
@@ -25929,6 +26247,11 @@
       if (node.kind === "ref") {
         return { kind: "matrix", rows: 1, columns: 1, values: [[ctx.getCellValue(node.sheet ?? ctx.currentSheet, node.row, node.column)]] };
       }
+      const rows = node.end.row - node.start.row + 1;
+      const columns = node.end.column - node.start.column + 1;
+      if (rows > 0 && columns > 0 && rows * columns > this.maxRangeCells) {
+        throw ERR.CALC();
+      }
       const values = [];
       for (let r = node.start.row; r <= node.end.row; r++) {
         const row = [];
@@ -25995,6 +26318,10 @@
     /** Remove all formula registrations (used before bulk re-registration). */
     clear() {
       this.formulas.clear();
+      this.rangesBySheet.clear();
+      this.dirty.clear();
+      this.opaqueFormulas.clear();
+      this.depth = 0;
     }
     cachedValue(sheet, row, column) {
       return this.formulas.get(key(sheet, row, column, sheet))?.value ?? null;
@@ -26005,6 +26332,9 @@
       return count;
     }
   };
+  function withinRange(range, row, column) {
+    return row >= range.top && row <= range.bottom && column >= range.left && column <= range.right;
+  }
   function stringify(v) {
     if (v === null) return "";
     if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
@@ -26312,6 +26642,14 @@
   // packages/core/src/tables.ts
   var TableStore = class {
     tables = [];
+    /** Owning worksheet (set by the Worksheet field initializer). */
+    owner;
+    constructor(owner) {
+      this.owner = owner;
+    }
+    invalidateOpaqueReaders() {
+      this.owner?.workbook.formulaGraph.invalidateOpaqueFormulas();
+    }
     add(worksheet, options) {
       const rect = parseRange(options.range);
       const name = options.name;
@@ -26334,6 +26672,7 @@
         columns
       };
       this.tables.push(table);
+      this.invalidateOpaqueReaders();
       return table;
     }
     get(name) {
@@ -26349,6 +26688,7 @@
     }
     remove(name) {
       this.tables = this.tables.filter((t) => t.name !== name);
+      this.invalidateOpaqueReaders();
     }
     /**
      * Shift table bounds after a structural row/column change. `mapper` maps an
@@ -26530,11 +26870,24 @@
   };
 
   // packages/core/src/charts.ts
-  var DEFAULT_CHART_COLORS = ["#2563eb", "#16a34a", "#dc2626", "#ca8a04", "#7c3aed", "#0891b2"];
+  var DEFAULT_CHART_COLORS = ["#2563eb", "#00b374", "#0ea5e9", "#00ff99", "#1e40af", "#00875a"];
+  function sanitizeChartColor(value) {
+    if (typeof value !== "string") return null;
+    const text = value.trim();
+    if (/^#[0-9a-f]{3,8}$/i.test(text)) return text;
+    if (/^[a-z]{1,32}$/i.test(text)) return text.toLowerCase();
+    if (/^(rgb|rgba|hsl|hsla)\(\s*[\d\s.,%/]+\)$/i.test(text)) return text.replace(/\s+/g, " ");
+    return null;
+  }
   var ChartEngine = class {
     charts = [];
     add(spec) {
-      const full = { ...spec, id: createId("chart") };
+      const colors = Array.isArray(spec.colors) ? spec.colors.map((color) => sanitizeChartColor(String(color))).filter((color) => color !== null) : void 0;
+      const full = {
+        ...spec,
+        colors: colors && colors.length > 0 ? colors : void 0,
+        id: createId("chart")
+      };
       this.charts.push(full);
       return full;
     }
@@ -26559,7 +26912,7 @@
       const values = [];
       for (let r = rect.top + headerOffset; r <= rect.bottom; r++) {
         const v = worksheet.getValue(r, c);
-        if (typeof v === "number") values.push(v);
+        values.push(typeof v === "number" && Number.isFinite(v) ? v : null);
       }
       series.push({ name: name === null || name === void 0 ? `Series ${c - rect.left}` : String(name), values });
     }
@@ -26579,7 +26932,6 @@
     compute(worksheet, spec) {
       const rect = parseRange(spec.source);
       const headerOffset = 1;
-      const groupCols = spec.rows;
       const valueCols = spec.values;
       const groups = /* @__PURE__ */ new Map();
       const rowOrder = [];
@@ -26671,11 +27023,37 @@
   // packages/csv/src/csv.ts
   var CANDIDATES = [",", ";", "	", "|"];
   function detectDelimiter(text) {
-    const line = text.split(/\r?\n/).find((l) => l.trim() !== "") ?? "";
+    const counts = new Map(CANDIDATES.map((candidate) => [candidate, 0]));
+    let inQuotes = false;
+    let i = 0;
+    const maxScan = Math.min(text.length, 64 * 1024);
+    while (i < maxScan) {
+      const ch = text[i];
+      if (inQuotes) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') {
+            i += 2;
+          } else {
+            inQuotes = false;
+            i += 1;
+          }
+        } else {
+          i += 1;
+        }
+        continue;
+      }
+      if (ch === '"') {
+        inQuotes = true;
+        i += 1;
+        continue;
+      }
+      if (counts.has(ch)) counts.set(ch, counts.get(ch) + 1);
+      i += 1;
+    }
     let best = ",";
     let bestCount = 0;
     for (const candidate of CANDIDATES) {
-      const count = line.split(candidate).length - 1;
+      const count = counts.get(candidate) ?? 0;
       if (count > bestCount) {
         best = candidate;
         bestCount = count;
@@ -26851,19 +27229,23 @@
   function worksheetFromCsv(worksheet, text, options = {}) {
     const parsed = parseCsv(text, options);
     const anchorRect = options.anchor ? parseRange(options.anchor) : { top: 0, left: 0, bottom: 0, right: 0 };
-    for (let r = 0; r < parsed.rows.length; r++) {
-      const row = parsed.rows[r];
-      for (let c = 0; c < row.length; c++) {
-        const value = row[c];
-        const asFormula = options.formulas === true && typeof value === "string" && value.startsWith("=");
-        worksheet.setValue(anchorRect.top + r, anchorRect.left + c, value, { literal: !asFormula });
+    worksheet.workbook.beginUpdate();
+    try {
+      for (let r = 0; r < parsed.rows.length; r++) {
+        const row = parsed.rows[r];
+        for (let c = 0; c < row.length; c++) {
+          const value = row[c];
+          const asFormula = options.formulas === true && typeof value === "string" && value.startsWith("=");
+          worksheet.setValue(anchorRect.top + r, anchorRect.left + c, value, { literal: !asFormula });
+        }
       }
+    } finally {
+      worksheet.workbook.endUpdate();
     }
   }
 
   // packages/core/src/plugins.ts
   var PluginManager = class {
-    disposers = [];
     plugins;
     constructor(plugins = []) {
       this.plugins = plugins;
@@ -26871,34 +27253,74 @@
     get names() {
       return this.plugins.map((p) => p.name);
     }
-    /** Run all plugin setups; errors are surfaced with the plugin name. */
+    /**
+     * Run all plugin setups and return a disposer owning THIS attachment.
+     * Renderer replacement on the same workbook no longer accumulates
+     * disposers: each attachment disposes exactly what it created (F17).
+     * If a plugin fails mid-run, already-set-up plugins are disposed first.
+     */
     run(context) {
+      const disposers = [];
       for (const plugin of this.plugins) {
         try {
           const disposer = plugin.setup(context);
-          if (typeof disposer === "function") this.disposers.push(disposer);
+          if (typeof disposer === "function") disposers.push(disposer);
         } catch (error) {
+          for (const disposer of disposers.reverse()) {
+            try {
+              disposer();
+            } catch {
+            }
+          }
           throw new Error(`plugin "${plugin.name}" failed during setup: ${error.message}`);
         }
       }
+      return () => {
+        for (const disposer of disposers.reverse()) {
+          try {
+            disposer();
+          } catch {
+          }
+        }
+        disposers.length = 0;
+      };
+    }
+    /** Dispose every live attachment (workbook-lifetime teardown, F17). */
+    attachments = [];
+    /**
+     * Register an attachment so workbook teardown can dispose all of them.
+     * Returns the attachment's own disposer.
+     */
+    attach(context) {
+      const disposer = this.run(context);
+      this.attachments.push(disposer);
+      return () => {
+        disposer();
+        const index = this.attachments.indexOf(disposer);
+        if (index >= 0) this.attachments.splice(index, 1);
+      };
     }
     destroy() {
-      for (const disposer of this.disposers.reverse()) {
+      for (const disposer of this.attachments.reverse()) {
         try {
           disposer();
         } catch {
         }
       }
-      this.disposers.length = 0;
+      this.attachments.length = 0;
     }
   };
 
   // packages/core/src/workbook.ts
+  function isCellInput(value) {
+    return typeof value === "object" && value !== null && !Array.isArray(value) && ("value" in value || "formula" in value || "literal" in value);
+  }
+  var MAX_WORKSHEET_ROWS = 1048576;
+  var MAX_WORKSHEET_COLUMNS = 16384;
   var DEFAULT_ROW_HEIGHT = 24;
   var DEFAULT_COLUMN_WIDTH = 100;
   var Worksheet = class {
     id;
-    name;
     workbook;
     cells = new SparseCellStore();
     rowSizes;
@@ -26910,7 +27332,7 @@
     /** Merged ranges (§16): anchor-only data rule. */
     merges = new MergeStore();
     /** Structured tables (§25). */
-    tables = new TableStore();
+    tables = new TableStore(this);
     /** Number format masks keyed by "row,column". */
     numberFormats = /* @__PURE__ */ new Map();
     /** Validation rules (§24). */
@@ -26926,7 +27348,13 @@
     /** Merge a range (A1 notation). Data lives on the anchor cell. */
     merge(range) {
       const rect = parseRange(range);
-      this.merges.merge(rect);
+      const created = this.merges.merge(rect);
+      if (!created) return;
+      const payloadRect = { top: rect.top, left: rect.left, bottom: rect.bottom, right: rect.right };
+      this.workbook.emitOperation(
+        op(this.workbook.id, "merges.set", { added: [payloadRect], removed: [] }, this.id),
+        [op(this.workbook.id, "merges.set", { added: [], removed: [payloadRect] }, this.id)]
+      );
     }
     /** Create a structured table from a range. */
     addTable(options) {
@@ -26966,16 +27394,20 @@
     }
     unmerge(range) {
       const rect = parseRange(range);
-      this.merges.unmergeAt(rect.top, rect.left);
+      const existing = this.merges.findAt(rect.top, rect.left);
+      if (!this.merges.unmergeAt(rect.top, rect.left)) return;
+      const payloadRect = existing ? { top: existing.top, left: existing.left, bottom: existing.bottom, right: existing.right } : { top: rect.top, left: rect.left, bottom: rect.bottom, right: rect.right };
+      this.workbook.emitOperation(
+        op(this.workbook.id, "merges.set", { added: [], removed: [payloadRect] }, this.id),
+        [op(this.workbook.id, "merges.set", { added: [payloadRect], removed: [] }, this.id)]
+      );
     }
     /** Apply a number format mask to a range (A1 notation). */
     setNumberFormat(range, mask) {
       const rect = parseRange(range);
-      for (let r = rect.top; r <= rect.bottom; r++) {
-        for (let c = rect.left; c <= rect.right; c++) {
-          this.numberFormats.set(`${r},${c}`, mask);
-        }
-      }
+      this.recordMetaChange(rect, (r, c) => {
+        this.numberFormats.set(`${r},${c}`, mask);
+      });
     }
     getNumberFormat(row, column) {
       return this.numberFormats.get(`${row},${column}`);
@@ -27004,7 +27436,8 @@
     }
     // ── Filters (§20 prototype): value-predicate row filters ────────────────
     filters = /* @__PURE__ */ new Map();
-    filteredRows = /* @__PURE__ */ new Set();
+    /** Rows hidden exclusively by filters — separate from manual hides (F19). */
+    filterHiddenRows = /* @__PURE__ */ new Set();
     setFilter(column, predicate) {
       this.filters.set(column, predicate);
       this.applyFilters();
@@ -27014,9 +27447,12 @@
       else this.filters.delete(column);
       this.applyFilters();
     }
+    /** Re-evaluate filters after data or formula changes (F19). */
+    refreshFilters() {
+      if (this.filters.size > 0) this.applyFilters();
+    }
     applyFilters() {
-      for (const row of this.filteredRows) this.hiddenRows.delete(row);
-      this.filteredRows.clear();
+      this.filterHiddenRows.clear();
       if (this.filters.size === 0) return;
       const used = this.cells.usedRange;
       if (!used) return;
@@ -27030,21 +27466,16 @@
             break;
           }
         }
-        if (!visible) {
-          this.hiddenRows.add(r);
-          this.filteredRows.add(r);
-        }
+        if (!visible) this.filterHiddenRows.add(r);
       }
     }
     // ── Cell editor assignment (§13.2 prototype) ─────────────────────────────
     cellEditors = /* @__PURE__ */ new Map();
     setCellEditor(range, type, options) {
       const rect = parseRange(range);
-      for (let r = rect.top; r <= rect.bottom; r++) {
-        for (let c = rect.left; c <= rect.right; c++) {
-          this.cellEditors.set(`${r},${c}`, { type, options });
-        }
-      }
+      this.recordMetaChange(rect, (r, c) => {
+        this.cellEditors.set(`${r},${c}`, { type, options });
+      });
     }
     getEditorFor(row, column) {
       return this.cellEditors.get(`${row},${column}`);
@@ -27053,21 +27484,17 @@
     styles = /* @__PURE__ */ new Map();
     setStyle(range, style) {
       const rect = parseRange(range);
-      for (let r = rect.top; r <= rect.bottom; r++) {
-        for (let c = rect.left; c <= rect.right; c++) {
-          const key2 = `${r},${c}`;
-          const current = this.styles.get(key2) ?? {};
-          this.styles.set(key2, { ...current, ...style });
-        }
-      }
+      this.recordMetaChange(rect, (r, c) => {
+        const key2 = `${r},${c}`;
+        const current = this.styles.get(key2) ?? {};
+        this.styles.set(key2, { ...current, ...style });
+      });
     }
     clearStyle(range) {
       const rect = parseRange(range);
-      for (let r = rect.top; r <= rect.bottom; r++) {
-        for (let c = rect.left; c <= rect.right; c++) {
-          this.styles.delete(`${r},${c}`);
-        }
-      }
+      this.recordMetaChange(rect, (r, c) => {
+        this.styles.delete(`${r},${c}`);
+      });
     }
     getStyle(row, column) {
       return this.styles.get(`${row},${column}`);
@@ -27076,22 +27503,55 @@
     notes = /* @__PURE__ */ new Map();
     setNote(range, text) {
       const rect = parseRange(range);
-      for (let r = rect.top; r <= rect.bottom; r++) {
-        for (let c = rect.left; c <= rect.right; c++) {
-          this.notes.set(`${r},${c}`, text);
-        }
-      }
+      this.recordMetaChange(rect, (r, c) => {
+        this.notes.set(`${r},${c}`, text);
+      });
     }
     getNote(row, column) {
       return this.notes.get(`${row},${column}`);
     }
     clearNote(range) {
       const rect = parseRange(range);
+      this.recordMetaChange(rect, (r, c) => {
+        this.notes.delete(`${r},${c}`);
+      });
+    }
+    /**
+     * Apply a metadata mutation across a range with a reversible history
+     * record: forward op carries the new per-cell values, inverse carries
+     * the previous ones (F08). Unchanged cells are omitted from both.
+     */
+    recordMetaChange(rect, mutate) {
+      const before = [];
+      const after = [];
       for (let r = rect.top; r <= rect.bottom; r++) {
         for (let c = rect.left; c <= rect.right; c++) {
-          this.notes.delete(`${r},${c}`);
+          const beforeSnap = this.metaSnapshotFor(r, c);
+          mutate(r, c);
+          const afterSnap = this.metaSnapshotFor(r, c);
+          if (metaSnapshotsDiffer(beforeSnap, afterSnap)) {
+            before.push(beforeSnap);
+            after.push(afterSnap);
+          }
         }
       }
+      if (before.length === 0) return;
+      this.workbook.emitOperation(
+        op(this.workbook.id, "meta.set", { cells: after }, this.id),
+        [op(this.workbook.id, "meta.set", { cells: before }, this.id)]
+      );
+    }
+    /** Complete per-cell metadata snapshot (null = absent). */
+    metaSnapshotFor(row, column) {
+      const key2 = `${row},${column}`;
+      return {
+        row,
+        column,
+        style: this.styles.get(key2) ?? null,
+        note: this.notes.get(key2) ?? null,
+        format: this.numberFormats.get(key2) ?? null,
+        editor: this.cellEditors.get(key2) ?? null
+      };
     }
     // ── Nested headers (§17.2): multi-level column header groups ────────────
     nestedHeadersConfig = [];
@@ -27130,17 +27590,35 @@
       return this.rowGroupsConfig;
     }
     isRowHidden(row) {
-      return this.hiddenRows.has(row) || this.groupHiddenRows.has(row);
+      return this.hiddenRows.has(row) || this.groupHiddenRows.has(row) || this.filterHiddenRows.has(row);
     }
     constructor(workbook, config = {}) {
       this.workbook = workbook;
       this.id = config.id ?? createId("sheet");
-      this.name = config.name ?? "Sheet1";
-      this.rowCount = config.rows ?? 1e3;
-      this.columnCount = config.columns ?? 26;
+      this.name_ = workbook.uniqueSheetName(config.name);
+      this.rowCount = validateDimension(config.rows ?? 1e3, "rows");
+      this.columnCount = validateDimension(config.columns ?? 26, "columns");
       this.rowSizes = new SizeIndex(this.rowCount, DEFAULT_ROW_HEIGHT);
       this.columnSizes = new SizeIndex(this.columnCount, DEFAULT_COLUMN_WIDTH);
       if (config.data) this.load2DArray(config.data);
+    }
+    name_;
+    get name() {
+      return this.name_;
+    }
+    /** Controlled rename: keeps the formula graph and cross-sheet refs in sync (F11). */
+    set name(value) {
+      if (typeof value !== "string" || value.trim() === "" || value.includes("!")) {
+        throw new Error('worksheet name must be a non-empty string without "!"');
+      }
+      const next = this.workbook.uniqueSheetName(value, this);
+      const previous = this.name_;
+      if (next === previous) {
+        this.name_ = next;
+        return;
+      }
+      this.name_ = next;
+      this.workbook.onWorksheetRenamed(this, previous, next);
     }
     load2DArray(data) {
       for (let r = 0; r < data.length; r++) {
@@ -27148,7 +27626,13 @@
         for (let c = 0; c < row.length; c++) {
           const v = row[c];
           if (v === null || v === void 0 || v === "") continue;
-          if (typeof v === "string" && v.startsWith("=")) {
+          if (isCellInput(v)) {
+            if (v.formula !== void 0) {
+              this.setCellRaw(r, c, void 0, v.formula.startsWith("=") ? v.formula : `=${v.formula}`);
+            } else {
+              this.setCellRaw(r, c, v.value);
+            }
+          } else if (typeof v === "string" && v.startsWith("=")) {
             this.setCellRaw(r, c, void 0, v);
           } else {
             this.setCellRaw(r, c, v);
@@ -27159,6 +27643,7 @@
     setCellRaw(row, column, raw, formula) {
       if (formula === void 0 && (raw === void 0 || raw === null)) {
         this.cells.setCell(row, column, void 0);
+        this.workbook.formulaGraph.notifyCellChange(this.name, row, column);
         return;
       }
       const record = formula !== void 0 ? { formula } : { raw };
@@ -27168,7 +27653,14 @@
         graph.setCurrentSheet(this.name);
         graph.setFormula(this.name, row, column, formula, Parser.parse(formula.slice(1)));
         this.getValue(row, column);
+      } else {
+        this.workbook.formulaGraph.notifyCellChange(this.name, row, column);
       }
+    }
+    /** Direct formula-cell registration used by snapshot loading (F13). */
+    loadFormulaCell(row, column, formula) {
+      if (!formula.startsWith("=")) formula = `=${formula}`;
+      this.setCellRaw(row, column, void 0, formula);
     }
     /** Get the calculated display value of a cell (formulas evaluated via dependency graph). */
     getValue(row, column) {
@@ -27192,16 +27684,16 @@
     evaluateAnchor(row, column) {
       const graph = this.workbook.formulaGraph;
       graph.setCurrentSheet(this.name);
+      const key2 = `${row},${column}`;
+      this.clearSpill(key2);
       const value = graph.recalculate(
         this.name,
         row,
         column,
         (s, r, c) => this.readRawValue(s ?? this.name, r, c)
       );
-      const key2 = `${row},${column}`;
       if (isMatrix(value)) {
         if (this.isSpillBlocked(row, column, value.rows, value.columns)) {
-          this.clearSpill(key2);
           this.spillError.set(key2, true);
           return { value: "#SPILL!" };
         }
@@ -27209,9 +27701,19 @@
         this.registerSpill(row, column, value);
         return { matrix: value, value: value.values[0]?.[0] ?? null };
       }
-      this.clearSpill(key2);
       this.spillError.delete(key2);
       return { value: value instanceof FormulaError ? value.value : value };
+    }
+    /**
+     * Remove the spill occupying a cell: the cell's own spill if it is an
+     * anchor, otherwise the anchor that covers it. Undo/redo replay and
+     * overwrites use this so ownership never goes stale (F10).
+     */
+    releaseSpillAt(row, column) {
+      const key2 = `${row},${column}`;
+      const owner = this.spillCover.get(key2) ?? key2;
+      this.clearSpill(owner);
+      this.spillError.delete(key2);
     }
     /** Spills keyed by anchor "row,column". */
     spills = /* @__PURE__ */ new Map();
@@ -27227,13 +27729,17 @@
       for (let r = row; r < row + rows; r++) {
         for (let c = column; c < column + columns; c++) {
           if (r === row && c === column) continue;
+          if (r >= this.rowCount || c >= this.columnCount) return true;
           if (this.cells.getCell(r, c) !== void 0) return true;
+          if (this.spillCover.has(`${r},${c}`)) return true;
+          if (this.merges.findAt(r, c)) return true;
         }
       }
       return false;
     }
     registerSpill(row, column, value) {
       const key2 = `${row},${column}`;
+      this.clearSpill(key2);
       this.spills.set(key2, { rows: value.rows, columns: value.columns });
       for (let r = row; r < row + value.rows; r++) {
         for (let c = column; c < column + value.columns; c++) {
@@ -27298,6 +27804,8 @@
      * with formulas disabled).
      */
     setValue(row, column, value, options) {
+      assertCoordinate(row, "row");
+      assertCoordinate(column, "column");
       if (value !== null && value !== void 0) {
         const result = this.validations.check(this, row, column, value);
         if (result.action === "reject" && !result.allowed) {
@@ -27326,9 +27834,7 @@
         formula = value;
         raw = void 0;
       }
-      const spillOwner = this.spillCover.get(`${row},${column}`) ?? `${row},${column}`;
-      if (this.spills.has(spillOwner)) this.clearSpill(spillOwner);
-      if (this.spillError.has(`${row},${column}`)) this.spillError.delete(`${row},${column}`);
+      this.releaseSpillAt(row, column);
       const previous = this.cells.getCell(row, column);
       const previousSnapshot = previous ? { raw: previous.raw, formula: previous.formula, styleId: previous.styleId } : void 0;
       if (previous?.formula !== void 0) {
@@ -27342,6 +27848,7 @@
         this.id
       );
       this.workbook.emitOperation(operation);
+      this.refreshFilters();
       return operation;
     }
     getAddress(row, column) {
@@ -27360,6 +27867,51 @@
       this.workbook.transformFormulasForStructuralChange(this.name, shift);
     }
     insertRows(index, count = 1) {
+      const amount = this.validateInsert(index, count, this.rowCount, MAX_WORKSHEET_ROWS);
+      this.applyRowsInsert(index, amount);
+      this.workbook.emitOperation(
+        op(this.workbook.id, "rows.insert", { index, count: amount }, this.id),
+        // Inserted rows hold no data, so deleting them restores the prior state (F08).
+        [op(this.workbook.id, "rows.delete", { index, count: amount }, this.id)]
+      );
+    }
+    deleteRows(index, count = 1) {
+      const amount = this.validateDelete(index, count, this.rowCount);
+      const captured = this.captureRowBand(index, amount);
+      this.applyRowsDelete(index, amount);
+      this.workbook.emitOperation(
+        op(this.workbook.id, "rows.delete", { index, count: amount }, this.id),
+        [
+          op(this.workbook.id, "rows.insert", { index, count: amount }, this.id),
+          op(this.workbook.id, "cells.replace", { cells: captured.cells, hiddenRows: captured.hiddenRows }, this.id)
+        ]
+      );
+    }
+    insertColumns(index, count = 1) {
+      const amount = this.validateInsert(index, count, this.columnCount, MAX_WORKSHEET_COLUMNS);
+      this.applyColumnsInsert(index, amount);
+      this.workbook.emitOperation(
+        op(this.workbook.id, "columns.insert", { index, count: amount }, this.id),
+        [op(this.workbook.id, "columns.delete", { index, count: amount }, this.id)]
+      );
+    }
+    deleteColumns(index, count = 1) {
+      const amount = this.validateDelete(index, count, this.columnCount);
+      const captured = this.captureColumnBand(index, amount);
+      this.applyColumnsDelete(index, amount);
+      this.workbook.emitOperation(
+        op(this.workbook.id, "columns.delete", { index, count: amount }, this.id),
+        [
+          op(this.workbook.id, "columns.insert", { index, count: amount }, this.id),
+          op(this.workbook.id, "cells.replace", { cells: captured.cells, hiddenColumns: captured.hiddenColumns }, this.id)
+        ]
+      );
+    }
+    /**
+     * Raw structural application used by undo/redo replay: identical to the
+     * public operations but emits nothing and records no history.
+     */
+    applyRowsInsert(index, count) {
       this.clearAllSpills();
       this.cells.insertRows(index, count);
       this.rowCount += count;
@@ -27367,11 +27919,8 @@
       this.transformSizes("row", index, count);
       this.rewriteFormulas({ kind: "row", at: index, delta: count });
       this.workbook.transformHistory(this.id, "row", index, count);
-      this.workbook.emitOperation(
-        op(this.workbook.id, "rows.insert", { index, count }, this.id)
-      );
     }
-    deleteRows(index, count = 1) {
+    applyRowsDelete(index, count) {
       this.clearAllSpills();
       this.cells.deleteRows(index, count);
       this.rowCount = Math.max(1, this.rowCount - count);
@@ -27379,11 +27928,8 @@
       this.transformSizes("row", index, -count);
       this.rewriteFormulas({ kind: "row", at: index, delta: -count });
       this.workbook.transformHistory(this.id, "row", index, -count);
-      this.workbook.emitOperation(
-        op(this.workbook.id, "rows.delete", { index, count }, this.id)
-      );
     }
-    insertColumns(index, count = 1) {
+    applyColumnsInsert(index, count) {
       this.clearAllSpills();
       this.cells.insertColumns(index, count);
       this.columnCount += count;
@@ -27391,11 +27937,8 @@
       this.transformSizes("column", index, count);
       this.rewriteFormulas({ kind: "column", at: index, delta: count });
       this.workbook.transformHistory(this.id, "column", index, count);
-      this.workbook.emitOperation(
-        op(this.workbook.id, "columns.insert", { index, count }, this.id)
-      );
     }
-    deleteColumns(index, count = 1) {
+    applyColumnsDelete(index, count) {
       this.clearAllSpills();
       this.cells.deleteColumns(index, count);
       this.columnCount = Math.max(1, this.columnCount - count);
@@ -27403,9 +27946,27 @@
       this.transformSizes("column", index, -count);
       this.rewriteFormulas({ kind: "column", at: index, delta: -count });
       this.workbook.transformHistory(this.id, "column", index, -count);
-      this.workbook.emitOperation(
-        op(this.workbook.id, "columns.delete", { index, count }, this.id)
-      );
+    }
+    validateInsert(index, count, dimension, limit) {
+      if (!Number.isInteger(index) || index < 0 || index > dimension) {
+        throw new RangeError(`insert index must be an integer within [0, ${dimension}], got ${index}`);
+      }
+      if (!Number.isInteger(count) || count < 1) {
+        throw new RangeError(`insert count must be a positive integer, got ${count}`);
+      }
+      if (dimension + count > limit) {
+        throw new RangeError(`structural insert exceeds the supported dimension limit (${limit})`);
+      }
+      return count;
+    }
+    validateDelete(index, count, dimension) {
+      if (!Number.isInteger(index) || index < 0 || index >= dimension) {
+        throw new RangeError(`delete index must be an integer within [0, ${dimension - 1}], got ${index}`);
+      }
+      if (!Number.isInteger(count) || count < 1) {
+        throw new RangeError(`delete count must be a positive integer, got ${count}`);
+      }
+      return Math.min(count, dimension - index);
     }
     /**
      * Shift every coordinate-keyed and range-anchored metadata structure so
@@ -27443,6 +28004,7 @@
       };
       if (kind === "row") {
         remapSet(this.hiddenRows);
+        remapSet(this.filterHiddenRows);
         remapSet(this.groupHiddenRows);
         const rowIds = [];
         for (const [row, id] of this.rowIds) {
@@ -27512,8 +28074,48 @@
       if (kind === "row") Object.assign(this, { rowSizes: fresh });
       else Object.assign(this, { columnSizes: fresh });
     }
+    /** Snapshot a row band (cells, metadata, visibility) for undo restore (F08). */
+    captureRowBand(index, count) {
+      const cells = [];
+      for (let r = index; r < index + count; r++) {
+        this.cells.forEach((row, column, record) => {
+          if (row < index || row >= index + count) return;
+          cells.push({
+            row,
+            column,
+            raw: record.raw,
+            formula: record.formula,
+            style: this.styles.get(`${row},${column}`) ?? null,
+            note: this.notes.get(`${row},${column}`) ?? null,
+            format: this.numberFormats.get(`${row},${column}`) ?? null,
+            editor: this.cellEditors.get(`${row},${column}`) ?? null
+          });
+        });
+      }
+      const hiddenRows = [...this.hiddenRows].filter((r) => r >= index && r < index + count);
+      return { cells, hiddenRows };
+    }
+    /** Snapshot a column band for undo restore (F08). */
+    captureColumnBand(index, count) {
+      const cells = [];
+      this.cells.forEach((row, column, record) => {
+        if (column < index || column >= index + count) return;
+        cells.push({
+          row,
+          column,
+          raw: record.raw,
+          formula: record.formula,
+          style: this.styles.get(`${row},${column}`) ?? null,
+          note: this.notes.get(`${row},${column}`) ?? null,
+          format: this.numberFormats.get(`${row},${column}`) ?? null,
+          editor: this.cellEditors.get(`${row},${column}`) ?? null
+        });
+      });
+      const hiddenColumns = [...this.hiddenColumns].filter((c) => c >= index && c < index + count);
+      return { cells, hiddenColumns };
+    }
   };
-  var Workbook = class {
+  var Workbook = class _Workbook {
     id;
     worksheets = [];
     formulaGraph = new DependencyGraph();
@@ -27522,6 +28124,9 @@
     definedNames = /* @__PURE__ */ new Map();
     pluginManager;
     listeners = /* @__PURE__ */ new Set();
+    /** Update-transaction state for batched notifications (F02). */
+    updateDepth = 0;
+    suppressedOps = 0;
     constructor(options = {}) {
       this.id = options.id ?? createId("wb");
       this.pluginManager = new PluginManager(options.extensions ?? []);
@@ -27532,8 +28137,9 @@
         this.worksheets.push(new Worksheet(this, { name: "Sheet1" }));
       }
       this.formulaGraph.setNamesResolver((name) => this.resolveNameValue(name));
-      this.formulaGraph.setTableResolver((table, column, _item) => {
-        const sheet = this.activeWorksheet;
+      this.formulaGraph.setTableResolver((table, column, item, context) => {
+        const sheet = this.findTableSheet(table, context.sheet);
+        if (!sheet) return new FormulaError("#NAME?");
         const tableDef = sheet.tables.get(table);
         if (!tableDef) return new FormulaError("#NAME?");
         const rect = tableDef.range;
@@ -27543,8 +28149,19 @@
         }
         const colDef = tableDef.columns.find((c) => c.name === column);
         if (!colDef) return new FormulaError("#REF!");
+        if (item) {
+          const row = context.row;
+          if (row < top || row > rect.bottom) return new FormulaError("#VALUE!");
+          return sheet.readRawValue(sheet.name, row, colDef.index);
+        }
         return this.matrixFromRange(sheet, colDef.index, colDef.index, top, rect.bottom);
       });
+    }
+    /** Find a table by name: the formula's sheet first, then any sheet (F21). */
+    findTableSheet(table, formulaSheet) {
+      const owner = this.getWorksheet(formulaSheet);
+      if (owner?.tables.get(table)) return owner;
+      return this.worksheets.find((sheet) => sheet.tables.get(table) !== void 0);
     }
     /** Build a matrix value from a worksheet rectangle. */
     matrixFromRange(sheet, left, right, top, bottom) {
@@ -27552,7 +28169,7 @@
       for (let r = top; r <= bottom; r++) {
         const row = [];
         for (let c = left; c <= right; c++) {
-          row.push(sheet.readRawValue(this.activeWorksheet.name, r, c));
+          row.push(sheet.readRawValue(sheet.name, r, c));
         }
         values.push(row);
       }
@@ -27560,19 +28177,22 @@
     }
     setDefinedName(name, definition) {
       this.definedNames.set(name, definition);
+      this.formulaGraph.invalidateOpaqueFormulas();
     }
     removeDefinedName(name) {
       this.definedNames.delete(name);
+      this.formulaGraph.invalidateOpaqueFormulas();
     }
     /** Resolve a defined name to a runtime value (constant) or matrix (range). */
     resolveNameValue(name) {
       const definition = this.definedNames.get(name);
       if (!definition) {
-        const tableDef = this.activeWorksheet.tables.get(name);
-        if (tableDef) {
+        const sheet2 = this.findTableSheet(name, this.activeWorksheet.name);
+        const tableDef = sheet2?.tables.get(name);
+        if (sheet2 && tableDef) {
           const rect2 = tableDef.range;
           return this.matrixFromRange(
-            this.activeWorksheet,
+            sheet2,
             rect2.left,
             rect2.right,
             tableDef.headerRow ? rect2.top + 1 : rect2.top,
@@ -27614,6 +28234,34 @@
     get activeWorksheet() {
       return this.worksheets[0];
     }
+    /**
+     * Resolve a workbook-unique worksheet display name. Duplicate or empty
+     * requests get a deterministic suffix (F11).
+     */
+    uniqueSheetName(desired, exclude) {
+      const taken = new Set(
+        this.worksheets.filter((sheet) => sheet !== exclude).map((sheet) => sheet.name)
+      );
+      const base = typeof desired === "string" && desired.trim() !== "" && !desired.includes("!") ? desired : "Sheet1";
+      if (!taken.has(base)) return base;
+      for (let i = 2; ; i++) {
+        const candidate = `${base}-${i}`;
+        if (!taken.has(candidate)) return candidate;
+      }
+    }
+    /** Sync formula text and the graph after a controlled rename (F11). */
+    onWorksheetRenamed(sheet, previous, next) {
+      if (previous === next) return;
+      for (const other of this.worksheets) {
+        other.cells.forEach((row, column, record) => {
+          if (record.formula === void 0) return;
+          const body = record.formula.slice(1);
+          const renamed = renameSheetRefs(body, previous, next);
+          if (renamed !== body) record.formula = `=${renamed}`;
+        });
+      }
+      this.refreshFormulaGraph();
+    }
     addWorksheet(config = {}) {
       const sheet = new Worksheet(this, config);
       this.worksheets.push(sheet);
@@ -27623,34 +28271,74 @@
       const index = this.worksheets.findIndex((w) => w.id === id);
       if (index === -1) throw new Error(`worksheet not found: ${id}`);
       if (this.worksheets.length === 1) throw new Error("cannot remove the last worksheet");
+      const removed = this.worksheets[index];
+      this.formulaGraph.removeSheet(removed.name);
       this.worksheets.splice(index, 1);
+      this.refreshFormulaGraph();
     }
     onOperation(listener) {
       this.listeners.add(listener);
       return () => this.listeners.delete(listener);
     }
-    emitOperation(operation) {
-      this.recordWithInverse(operation);
+    /**
+     * Batch model notifications: during an update, operations are recorded
+     * (history) but listeners receive ONE aggregated `workbook.update` event
+     * at the end, so bulk actions (paste, fill, CSV import) produce one
+     * render pass instead of one per cell (F02). Synchronous: the final
+     * notification happens inside endUpdate.
+     */
+    beginUpdate() {
+      this.updateDepth += 1;
+    }
+    endUpdate() {
+      this.updateDepth = Math.max(0, this.updateDepth - 1);
+      if (this.updateDepth > 0) return;
+      const count = this.suppressedOps;
+      this.suppressedOps = 0;
+      if (count === 0) return;
+      const reference = this.activeWorksheet;
+      for (const listener of this.listeners) {
+        listener({
+          id: `update-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+          workbookId: this.id,
+          worksheetId: reference?.id,
+          type: "workbook.update",
+          payload: { count },
+          timestamp: Date.now()
+        });
+      }
+    }
+    emitOperation(operation, inverse) {
+      this.recordWithInverse(operation, inverse);
+      if (this.updateDepth > 0) {
+        this.suppressedOps += 1;
+        return;
+      }
       for (const listener of this.listeners) listener(operation);
     }
-    recordWithInverse(operation) {
-      if (operation.type === "cell.set") {
+    recordWithInverse(operation, providedInverse) {
+      let inverse = providedInverse;
+      if (!inverse && operation.type === "cell.set") {
         const payload = operation.payload;
-        const inverse = op(
-          this.id,
-          "cell.set",
-          {
-            row: payload.row,
-            column: payload.column,
-            raw: payload.previous?.raw,
-            formula: payload.previous?.formula,
-            previous: {
-              raw: payload.raw,
-              formula: payload.formula
-            }
-          },
-          operation.worksheetId
-        );
+        inverse = [
+          op(
+            this.id,
+            "cell.set",
+            {
+              row: payload.row,
+              column: payload.column,
+              raw: payload.previous?.raw,
+              formula: payload.previous?.formula,
+              previous: {
+                raw: payload.raw,
+                formula: payload.formula
+              }
+            },
+            operation.worksheetId
+          )
+        ];
+      }
+      if (inverse && inverse.length > 0) {
         this.history.push(operation, inverse);
       }
     }
@@ -27658,6 +28346,7 @@
     applyCellSet(payload, worksheetId) {
       const sheet = worksheetId !== void 0 ? this.worksheets.find((w) => w.id === worksheetId) : this.activeWorksheet;
       if (!sheet) return;
+      sheet.releaseSpillAt(payload.row, payload.column);
       const existing = sheet.cells.getCell(payload.row, payload.column);
       if (existing?.formula !== void 0) {
         this.formulaGraph.removeFormula(sheet.name, payload.row, payload.column);
@@ -27678,6 +28367,110 @@
           payload.column,
           payload.raw === null || payload.raw === void 0 ? void 0 : { raw: payload.raw }
         );
+        this.formulaGraph.notifyCellChange(sheet.name, payload.row, payload.column);
+      }
+      sheet.refreshFilters();
+    }
+    /**
+     * Apply a bulk cell snapshot (cells + per-cell metadata) used by the
+     * inverse of deletes and sorts (F08).
+     */
+    applyCellsReplace(payload, worksheetId) {
+      const sheet = worksheetId ? this.worksheets.find((w) => w.id === worksheetId) : void 0;
+      if (!sheet) return;
+      for (const cell of payload.cells ?? []) {
+        sheet.releaseSpillAt(cell.row, cell.column);
+        const existing = sheet.cells.getCell(cell.row, cell.column);
+        if (existing?.formula !== void 0) {
+          this.formulaGraph.removeFormula(sheet.name, cell.row, cell.column);
+        }
+        sheet.cells.setCell(
+          cell.row,
+          cell.column,
+          cell.raw === void 0 && cell.formula === void 0 ? void 0 : cell.formula !== void 0 ? { formula: cell.formula } : { raw: cell.raw }
+        );
+        const key2 = `${cell.row},${cell.column}`;
+        if (cell.style === null || cell.style === void 0) sheet.styles.delete(key2);
+        else sheet.styles.set(key2, cell.style);
+        if (cell.note === null) sheet.notes.delete(key2);
+        else if (cell.note !== void 0) sheet.notes.set(key2, cell.note);
+        if (cell.format === null) sheet.numberFormats.delete(key2);
+        else if (cell.format !== void 0) sheet.numberFormats.set(key2, cell.format);
+        if (cell.editor === null) sheet.cellEditors.delete(key2);
+        else if (cell.editor !== void 0) sheet.cellEditors.set(key2, cell.editor);
+      }
+      if (payload.hiddenRows) for (const row of payload.hiddenRows) sheet.hiddenRows.add(row);
+      if (payload.hiddenColumns) for (const column of payload.hiddenColumns) sheet.hiddenColumns.add(column);
+      this.refreshFormulaGraph();
+      sheet.refreshFilters();
+    }
+    /** Replay per-cell metadata (style/note/format/editor) snapshots (F08). */
+    applyMetaSet(payload, worksheetId) {
+      const sheet = worksheetId ? this.worksheets.find((w) => w.id === worksheetId) : void 0;
+      if (!sheet) return;
+      for (const cell of payload.cells) {
+        const key2 = `${cell.row},${cell.column}`;
+        if (cell.style === null) sheet.styles.delete(key2);
+        else if (cell.style !== void 0) sheet.styles.set(key2, cell.style);
+        if (cell.note === null) sheet.notes.delete(key2);
+        else if (cell.note !== void 0) sheet.notes.set(key2, cell.note);
+        if (cell.format === null) sheet.numberFormats.delete(key2);
+        else if (cell.format !== void 0) sheet.numberFormats.set(key2, cell.format);
+        if (cell.editor === null) sheet.cellEditors.delete(key2);
+        else if (cell.editor !== void 0) sheet.cellEditors.set(key2, cell.editor);
+      }
+    }
+    /** Replay merge/unmerge state: removals first, then creations (F08). */
+    applyMergesSet(payload, worksheetId) {
+      const sheet = worksheetId ? this.worksheets.find((w) => w.id === worksheetId) : void 0;
+      if (!sheet) return;
+      for (const rect of payload.removed ?? []) {
+        sheet.merges.unmergeAt(rect.top, rect.left);
+      }
+      for (const rect of payload.added ?? []) {
+        sheet.merges.merge(rect);
+      }
+    }
+    /** Replay a stored history operation (cell, bulk or structural). */
+    applyHistoryOperation(operation) {
+      switch (operation.type) {
+        case "cell.set":
+          this.applyCellSet(operation.payload, operation.worksheetId);
+          break;
+        case "cells.replace":
+          this.applyCellsReplace(
+            operation.payload,
+            operation.worksheetId
+          );
+          break;
+        case "meta.set":
+          this.applyMetaSet(operation.payload, operation.worksheetId);
+          break;
+        case "merges.set":
+          this.applyMergesSet(operation.payload, operation.worksheetId);
+          break;
+        case "rows.insert": {
+          const { index, count } = operation.payload;
+          this.worksheets.find((w) => w.id === operation.worksheetId)?.applyRowsInsert(index, count);
+          break;
+        }
+        case "rows.delete": {
+          const { index, count } = operation.payload;
+          this.worksheets.find((w) => w.id === operation.worksheetId)?.applyRowsDelete(index, count);
+          break;
+        }
+        case "columns.insert": {
+          const { index, count } = operation.payload;
+          this.worksheets.find((w) => w.id === operation.worksheetId)?.applyColumnsInsert(index, count);
+          break;
+        }
+        case "columns.delete": {
+          const { index, count } = operation.payload;
+          this.worksheets.find((w) => w.id === operation.worksheetId)?.applyColumnsDelete(index, count);
+          break;
+        }
+        default:
+          break;
       }
     }
     /** Rebuild the workbook-wide formula graph from every worksheet's records. */
@@ -27717,39 +28510,86 @@
       }
       this.refreshFormulaGraph();
     }
-    /** Keep undo/redo cell targets aligned with structural row/column changes. */
+    /**
+     * Keep undo/redo targets aligned with structural row/column changes.
+     * Coordinates of entries on the edited sheet are remapped, and every
+     * stored formula (forward, inverse and snapshot) is rewritten when its
+     * references point at the changed sheet (F07).
+     */
     transformHistory(sheetId, kind, at, delta) {
-      this.history.transformCells(sheetId, (row, column) => {
-        const mappedRow = kind === "row" ? shiftPosition(row, at, delta) : row;
-        const mappedColumn = kind === "column" ? shiftPosition(column, at, delta) : column;
-        if (mappedRow === void 0 || mappedColumn === void 0) return void 0;
-        return { row: mappedRow, column: mappedColumn };
-      });
+      const targetSheet = this.worksheets.find((w) => w.id === sheetId);
+      if (!targetSheet) return;
+      const shift = { kind, at, delta };
+      const edge = (pos, isStart) => shiftRangeEdge(pos, at, delta, isStart);
+      const mapRange = (rect) => {
+        const top = kind === "row" ? edge(rect.top, true) : rect.top;
+        const bottom = kind === "row" ? edge(rect.bottom, false) : rect.bottom;
+        const left = kind === "column" ? edge(rect.left, true) : rect.left;
+        const right = kind === "column" ? edge(rect.right, false) : rect.right;
+        if (top === void 0 || bottom === void 0 || left === void 0 || right === void 0 || bottom < top || right < left) {
+          return void 0;
+        }
+        return { top, left, bottom, right };
+      };
+      this.history.transformCells(
+        sheetId,
+        (row, column) => {
+          const mappedRow = kind === "row" ? shiftPosition(row, at, delta) : row;
+          const mappedColumn = kind === "column" ? shiftPosition(column, at, delta) : column;
+          if (mappedRow === void 0 || mappedColumn === void 0) return void 0;
+          return { row: mappedRow, column: mappedColumn };
+        },
+        (formula, operationSheetId) => {
+          const owner = this.worksheets.find((w) => w.id === operationSheetId);
+          if (!owner) return formula;
+          const body = formula.slice(1);
+          const transformed = transformFormulaRefs(body, shift, {
+            ownerSheet: owner.name,
+            targetSheet: targetSheet.name
+          });
+          return transformed === body ? formula : `=${transformed}`;
+        },
+        mapRange
+      );
     }
     undo() {
-      const operation = this.history.popUndo();
-      if (!operation) return;
-      const sheet = this.worksheets.find((w) => w.id === operation.worksheetId);
-      if (!sheet) return;
-      const payload = operation.payload;
-      this.applyCellSet(
-        {
-          row: payload.row,
-          column: payload.column,
-          raw: payload.previous?.raw,
-          formula: payload.previous?.formula
-        },
-        operation.worksheetId
-      );
-      this.emitOperation({ ...operation, type: "undo", payload: { of: operation.id } });
+      const entry = this.history.popUndo();
+      if (!entry) return;
+      this.history.setTransformExclusion(entry);
+      try {
+        for (const operation of entry.inverse) {
+          this.applyHistoryOperation(operation);
+        }
+      } finally {
+        this.history.setTransformExclusion(null);
+      }
+      this.emitMarker(entry, "undo");
     }
     redo() {
-      const operation = this.history.popRedo();
-      if (!operation || operation.type !== "cell.set") return;
-      const sheet = this.worksheets.find((w) => w.id === operation.worksheetId);
-      if (!sheet) return;
-      this.applyCellSet(operation.payload, operation.worksheetId);
-      this.emitOperation({ ...operation, type: "redo", payload: { of: operation.id } });
+      const entry = this.history.popRedo();
+      if (!entry) return;
+      this.history.setTransformExclusion(entry);
+      try {
+        for (const operation of entry.forward) {
+          this.applyHistoryOperation(operation);
+        }
+      } finally {
+        this.history.setTransformExclusion(null);
+      }
+      this.emitMarker(entry, "redo");
+    }
+    emitMarker(entry, type) {
+      const reference = entry.forward[0] ?? entry.inverse[0];
+      this.listeners.forEach(
+        (listener) => listener({
+          id: `${type}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,
+          workbookId: this.id,
+          worksheetId: reference?.worksheetId,
+          type,
+          payload: { of: reference?.id ?? null },
+          timestamp: Date.now()
+        })
+      );
     }
     get canUndo() {
       return this.history.canUndo;
@@ -27757,39 +28597,208 @@
     get canRedo() {
       return this.history.canRedo;
     }
-    /** Native JSON snapshot (format v1). */
+    /**
+     * Versioned, sparse document snapshot (format v2, F13). Serializes every
+     * serializable feature with explicit cell typing: a cell is a formula
+     * only when `formula` is present, so literal "="-prefixed text survives
+     * round-trips. Non-serializable state (custom predicates in validation /
+     * conditional-format rules, pivot caches) is omitted rather than silently
+     * degraded.
+     */
     toJSON() {
       return {
         format: "ezygrid",
-        version: 1,
+        version: 2,
         id: this.id,
+        definedNames: [...this.definedNames.entries()].filter(([, definition]) => definition.type === "range" || definition.type === "value" && typeof definition.value !== "function").map(([name, definition]) => ({ name, definition })),
         worksheets: this.worksheets.map((sheet) => {
-          const rows = [];
-          const used = sheet.cells.usedRange;
-          if (used) {
-            for (let r = 0; r <= used.bottom; r++) {
-              const row = [];
-              for (let c = 0; c <= used.right; c++) {
-                const record = sheet.cells.getCell(r, c);
-                if (!record) {
-                  row.push(null);
-                  continue;
-                }
-                row.push(record.formula ?? record.raw ?? null);
-              }
-              rows.push(row);
-            }
-          }
+          const cells = [];
+          sheet.cells.forEach((row, column, record) => {
+            const entry = {};
+            if (record.formula !== void 0) entry.formula = record.formula;
+            if (record.raw !== void 0) entry.raw = record.raw;
+            cells.push([row, column, entry]);
+          });
           return {
             id: sheet.id,
             name: sheet.name,
-            dimensions: { rows: sheet.rowCount, columns: sheet.columnCount },
-            data: rows
+            rows: sheet.rowCount,
+            columns: sheet.columnCount,
+            cells,
+            styles: [...sheet.styles.entries()],
+            numberFormats: [...sheet.numberFormats.entries()],
+            notes: [...sheet.notes.entries()],
+            cellEditors: [...sheet.cellEditors.entries()],
+            merges: sheet.merges.all.map((m) => rectToRange(m)),
+            hiddenRows: [...sheet.hiddenRows],
+            hiddenColumns: [...sheet.hiddenColumns],
+            rowSizes: [...sheet.rowSizes.getCustomSizes().entries()],
+            columnSizes: [...sheet.columnSizes.getCustomSizes().entries()],
+            rowGroups: [...sheet.getGroups()],
+            nestedHeaders: sheet.nestedHeaders.map((level) => [...level]),
+            tables: sheet.tables.all().map((table) => ({
+              name: table.name,
+              range: rectToRange(table.range),
+              headerRow: table.headerRow,
+              totalRow: table.totalRow
+            })),
+            validations: [...sheet.validations.all()].filter((rule) => rule.predicate === void 0).map((rule) => ({ range: rule.range, type: rule.type, action: rule.action, min: rule.min, max: rule.max, values: rule.values, length: rule.length, message: rule.message })),
+            conditionalFormats: [...sheet.conditionalFormats.all()].filter((rule) => rule.predicate === void 0).map((rule) => ({ range: rule.range, type: rule.type, operator: rule.operator, value: rule.value, text: rule.text, n: rule.n, style: rule.style, priority: rule.priority, stopIfTrue: rule.stopIfTrue })),
+            charts: sheet.charts.all().map((chart) => ({ ...chart })),
+            media: sheet.media.all().map((object) => ({ ...object }))
           };
         })
       };
     }
+    /** Load a snapshot produced by toJSON (F13); throws on unknown formats. */
+    static fromJSON(data) {
+      if (data === null || typeof data !== "object") {
+        throw new Error("invalid ezygrid snapshot: expected an object");
+      }
+      const snapshot = data;
+      if (snapshot.format !== "ezygrid") {
+        throw new Error("invalid ezygrid snapshot: unknown format");
+      }
+      if (snapshot.version !== 2) {
+        throw new Error(`unsupported ezygrid snapshot version: ${String(snapshot.version)}`);
+      }
+      const worksheetSnapshots = Array.isArray(snapshot.worksheets) ? snapshot.worksheets : [];
+      const workbook = new _Workbook({
+        id: typeof snapshot.id === "string" ? snapshot.id : void 0,
+        worksheets: worksheetSnapshots.map((raw) => ({
+          id: typeof raw?.id === "string" ? raw.id : void 0,
+          name: typeof raw?.name === "string" ? raw.name : void 0,
+          rows: typeof raw?.rows === "number" ? raw.rows : void 0,
+          columns: typeof raw?.columns === "number" ? raw.columns : void 0
+        }))
+      });
+      worksheetSnapshots.forEach((raw, index) => {
+        const sheet = workbook.worksheets[index];
+        if (!sheet) return;
+        const cells = Array.isArray(raw?.cells) ? raw.cells : [];
+        for (const entry of cells) {
+          if (!Array.isArray(entry) || entry.length < 3) continue;
+          const [row, column, payload] = entry;
+          if (!Number.isInteger(row) || !Number.isInteger(column) || row < 0 || column < 0) continue;
+          if (payload?.formula !== void 0) {
+            sheet.loadFormulaCell(row, column, payload.formula);
+          } else if (payload?.raw !== void 0) {
+            sheet.cells.setCell(row, column, { raw: payload.raw });
+          }
+        }
+        applyEntries(sheet.styles, raw?.styles);
+        applyEntries(sheet.numberFormats, raw?.numberFormats);
+        applyEntries(sheet.notes, raw?.notes);
+        applyEntries(sheet.cellEditors, raw?.cellEditors);
+        for (const merge of Array.isArray(raw?.merges) ? raw.merges : []) {
+          try {
+            sheet.merge(String(merge));
+          } catch {
+          }
+        }
+        for (const row of Array.isArray(raw?.hiddenRows) ? raw.hiddenRows : []) {
+          if (Number.isInteger(row) && row >= 0) sheet.hiddenRows.add(row);
+        }
+        for (const column of Array.isArray(raw?.hiddenColumns) ? raw.hiddenColumns : []) {
+          if (Number.isInteger(column) && column >= 0) sheet.hiddenColumns.add(column);
+        }
+        for (const entry of Array.isArray(raw?.rowSizes) ? raw.rowSizes : []) {
+          try {
+            if (Array.isArray(entry) && Number.isInteger(entry[0]) && entry[0] >= 0) {
+              sheet.rowSizes.setSize(entry[0], entry[1]);
+            }
+          } catch {
+          }
+        }
+        for (const entry of Array.isArray(raw?.columnSizes) ? raw.columnSizes : []) {
+          try {
+            if (Array.isArray(entry) && Number.isInteger(entry[0]) && entry[0] >= 0) {
+              sheet.columnSizes.setSize(entry[0], entry[1]);
+            }
+          } catch {
+          }
+        }
+        for (const group of Array.isArray(raw?.rowGroups) ? raw.rowGroups : []) {
+          if (group && Number.isInteger(group.start) && Number.isInteger(group.end) && Number.isInteger(group.end) && group.end >= group.start) {
+            sheet.groupRows(group.start, group.end);
+            if (group.collapsed) sheet.collapseGroup(group.start);
+          }
+        }
+        if (Array.isArray(raw?.nestedHeaders)) sheet.setNestedHeaders(raw.nestedHeaders);
+        for (const table of Array.isArray(raw?.tables) ? raw.tables : []) {
+          if (table && typeof table.name === "string" && typeof table.range === "string") {
+            try {
+              sheet.addTable({
+                name: table.name,
+                range: table.range,
+                headerRow: table.headerRow !== false,
+                totalRow: table.totalRow === true
+              });
+            } catch {
+            }
+          }
+        }
+        for (const rule of Array.isArray(raw?.validations) ? raw.validations : []) {
+          if (rule && typeof rule.range === "string" && typeof rule.type === "string") {
+            sheet.addValidation({
+              range: rule.range,
+              type: rule.type,
+              action: rule.action ?? "mark",
+              min: rule.min,
+              max: rule.max,
+              values: rule.values,
+              length: rule.length,
+              message: rule.message
+            });
+          }
+        }
+        for (const rule of Array.isArray(raw?.conditionalFormats) ? raw.conditionalFormats : []) {
+          if (rule && typeof rule.range === "string" && typeof rule.type === "string") {
+            sheet.conditionalFormats.add({
+              range: rule.range,
+              type: rule.type,
+              operator: rule.operator,
+              value: rule.value,
+              text: rule.text,
+              n: rule.n,
+              style: rule.style ?? {},
+              priority: rule.priority ?? 0,
+              stopIfTrue: rule.stopIfTrue
+            });
+          }
+        }
+        for (const chart of Array.isArray(raw?.charts) ? raw.charts : []) {
+          if (chart && typeof chart === "object" && typeof chart.type === "string" && typeof chart.source === "string") {
+            sheet.addChart(chart);
+          }
+        }
+        for (const object of Array.isArray(raw?.media) ? raw.media : []) {
+          if (object && typeof object === "object" && object.kind === "image") {
+            sheet.addImage(object);
+          } else if (object && typeof object === "object") {
+            sheet.addShape(object);
+          }
+        }
+      });
+      if (Array.isArray(snapshot.definedNames)) {
+        for (const entry of snapshot.definedNames) {
+          if (entry && typeof entry.name === "string" && entry.definition) {
+            workbook.setDefinedName(entry.name, entry.definition);
+          }
+        }
+      }
+      workbook.history.clear();
+      return workbook;
+    }
   };
+  function applyEntries(target, raw) {
+    if (!Array.isArray(raw)) return;
+    for (const entry of raw) {
+      if (Array.isArray(entry) && entry.length >= 2 && typeof entry[0] === "string") {
+        target.set(entry[0], entry[1]);
+      }
+    }
+  }
   function createGrid(_element, options = {}) {
     return new Workbook(options);
   }
@@ -27799,6 +28808,25 @@
     if (pos < at) return pos;
     if (pos < at + count) return void 0;
     return pos - count;
+  }
+  function assertCoordinate(value, label) {
+    if (!Number.isInteger(value) || value < 0) {
+      throw new RangeError(`cell ${label} must be a non-negative integer, got ${value}`);
+    }
+  }
+  function metaSnapshotsDiffer(a, b) {
+    const same = (x, y) => x === y || x !== null && y !== null && x !== void 0 && y !== void 0 && JSON.stringify(x) === JSON.stringify(y);
+    return !same(a.style, b.style) || !same(a.note, b.note) || !same(a.format, b.format) || !same(a.editor, b.editor);
+  }
+  function validateDimension(value, label) {
+    if (!Number.isInteger(value) || value < 1) {
+      throw new RangeError(`worksheet ${label} must be a positive integer, got ${value}`);
+    }
+    const limit = label === "columns" ? MAX_WORKSHEET_COLUMNS : MAX_WORKSHEET_ROWS;
+    if (value > limit) {
+      throw new RangeError(`worksheet ${label} exceeds the supported limit (${limit})`);
+    }
+    return value;
   }
   function shiftRangeEdge(pos, at, delta, isStart) {
     if (delta > 0) return pos >= at ? pos + delta : pos;
@@ -27893,6 +28921,66 @@
         ranges: [{ top: 0, left: column, bottom: this.rowCount - 1, right: column }]
       };
       this.emit();
+    }
+    /** Update dimension counts after structural changes; state is clamped (F15). */
+    resize(rowCount, columnCount) {
+      this.rowCount = Math.max(1, rowCount);
+      this.columnCount = Math.max(1, columnCount);
+      this.clampState();
+      this.emit();
+    }
+    /**
+     * Shift every stored coordinate through a structural insert/delete so
+     * active cell, anchor and ranges follow the data they described (F15).
+     */
+    transformAxis(axis, at, delta) {
+      const shift = (pos) => {
+        if (delta > 0) return pos >= at ? pos + delta : pos;
+        const count = -delta;
+        if (pos < at) return pos;
+        if (pos < at + count) return void 0;
+        return pos - count;
+      };
+      const mapPoint = (p) => {
+        if (axis === "row") {
+          const row = shift(p.row);
+          return row === void 0 ? void 0 : { row, column: p.column };
+        }
+        const column = shift(p.column);
+        return column === void 0 ? void 0 : { row: p.row, column };
+      };
+      const mapRect = (rect) => {
+        if (axis === "row") {
+          const top = shift(rect.top);
+          const bottom = shift(rect.bottom);
+          if (top === void 0 || bottom === void 0) return void 0;
+          return { ...rect, top, bottom };
+        }
+        const left = shift(rect.left);
+        const right = shift(rect.right);
+        if (left === void 0 || right === void 0) return void 0;
+        return { ...rect, left, right };
+      };
+      const fallback = axis === "row" ? at : Math.max(0, at - 1);
+      this.state.active = mapPoint(this.state.active) ?? { row: fallback, column: fallback };
+      this.state.anchor = mapPoint(this.state.anchor) ?? { row: fallback, column: fallback };
+      this.state.ranges = this.state.ranges.map(mapRect).filter((rect) => rect !== void 0);
+      if (this.state.ranges.length === 0) {
+        this.state.ranges = [{ top: this.state.active.row, left: this.state.active.column, bottom: this.state.active.row, right: this.state.active.column }];
+      }
+      this.clampState();
+      this.emit();
+    }
+    /** Clamp every stored coordinate inside the current dimensions. */
+    clampState() {
+      this.state.active = this.clamp(this.state.active.row, this.state.active.column);
+      this.state.anchor = this.clamp(this.state.anchor.row, this.state.anchor.column);
+      this.state.ranges = this.state.ranges.map((rect) => ({
+        top: Math.max(0, Math.min(this.rowCount - 1, rect.top)),
+        left: Math.max(0, Math.min(this.columnCount - 1, rect.left)),
+        bottom: Math.max(0, Math.min(this.rowCount - 1, rect.bottom)),
+        right: Math.max(0, Math.min(this.columnCount - 1, rect.right))
+      }));
     }
     get primary() {
       return this.state.ranges[this.state.ranges.length - 1];
@@ -28069,7 +29157,17 @@
             row.push({ raw: worksheet.getValue(r, c) });
           } else {
             const record = worksheet.cells.getCell(r, c);
-            row.push(record ? { raw: record.raw, formula: record.formula, style: worksheet.getStyle(r, c) } : { raw: null });
+            if (record) {
+              row.push({
+                raw: record.raw,
+                formula: record.formula,
+                style: worksheet.getStyle(r, c),
+                // A raw text value starting with "=" must paste as text (F16).
+                literal: record.formula === void 0 && typeof record.raw === "string" && record.raw.startsWith("=")
+              });
+            } else {
+              row.push({ raw: null });
+            }
           }
         }
         cells.push(row);
@@ -28094,42 +29192,66 @@
         }).join("	")
       ).join("\n");
     }
-    /** Parse external TSV into a clipboard payload. */
+    /**
+     * Parse external TSV into a clipboard payload. The parser is quote-aware
+     * over the WHOLE stream: quoted multiline cells stay one field and blank
+     * lines are preserved as rows (F16).
+     */
     static fromTSV(text) {
+      const normalized = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
       const rows = [];
-      const lines = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
-      for (const line of lines) {
-        if (line === "") continue;
-        const cells = [];
-        let i = 0;
-        while (i <= line.length) {
-          if (line[i] === '"') {
-            let value = "";
-            i += 1;
-            while (i < line.length) {
-              if (line[i] === '"' && line[i + 1] === '"') {
-                value += '"';
-                i += 2;
-              } else if (line[i] === '"') {
-                i += 1;
-                break;
-              } else {
-                value += line[i];
-                i += 1;
-              }
-            }
-            cells.push({ raw: value });
-          } else {
-            let value = "";
-            while (i < line.length && line[i] !== "	") {
-              value += line[i];
+      let cells = [];
+      let field = "";
+      let quoted = false;
+      const pushField2 = () => {
+        if (quoted) {
+          cells.push({ raw: field, literal: true });
+        } else {
+          const isNumeric = field !== "" && /^-?\d+(\.\d+)?$/.test(field);
+          cells.push({ raw: isNumeric ? Number(field) : field === "" ? null : field });
+        }
+        field = "";
+        quoted = false;
+      };
+      for (let i = 0; i < normalized.length; ) {
+        const ch = normalized[i];
+        if (quoted) {
+          if (ch === '"') {
+            if (normalized[i + 1] === '"') {
+              field += '"';
+              i += 2;
+            } else {
+              quoted = false;
               i += 1;
             }
-            const isNumeric = value !== "" && /^-?\d+(\.\d+)?$/.test(value);
-            cells.push({ raw: isNumeric ? Number(value) : value === "" ? null : value });
+          } else {
+            field += ch;
+            i += 1;
           }
-          i += 1;
+          continue;
         }
+        if (ch === '"') {
+          quoted = true;
+          i += 1;
+          continue;
+        }
+        if (ch === "	") {
+          pushField2();
+          i += 1;
+          continue;
+        }
+        if (ch === "\n") {
+          pushField2();
+          rows.push(cells);
+          cells = [];
+          i += 1;
+          continue;
+        }
+        field += ch;
+        i += 1;
+      }
+      if (field !== "" || cells.length > 0) {
+        pushField2();
         rows.push(cells);
       }
       const height = rows.length;
@@ -28141,26 +29263,37 @@
     }
     /**
      * Paste the buffer at a target anchor. Relative formula references move
-     * with the paste offset; absolute parts stay fixed (§12.3).
+     * with the paste offset; absolute parts stay fixed (§12.3). The whole
+     * paste is one history transaction (F09).
      */
     pasteTo(workbook, worksheet, anchorRow, anchorColumn) {
       if (!this.buffer) return;
-      const dRow = anchorRow - this.buffer.origin.row;
-      const dCol = anchorColumn - this.buffer.origin.column;
-      for (let r = 0; r < this.buffer.rows; r++) {
-        for (let c = 0; c < this.buffer.columns; c++) {
-          const source = this.buffer.cells[r][c];
-          const targetRow = anchorRow + r;
-          const targetColumn = anchorColumn + c;
-          if (source.formula !== void 0) {
-            worksheet.setValue(targetRow, targetColumn, translateFormula(source.formula, dRow, dCol));
-          } else {
-            worksheet.setValue(targetRow, targetColumn, source.raw ?? null);
-          }
-          if (source.style) {
-            worksheet.setStyle(toA1(targetRow, targetColumn), source.style);
+      const history = workbook.history;
+      history.beginBatch();
+      workbook.beginUpdate();
+      try {
+        const dRow = anchorRow - this.buffer.origin.row;
+        const dCol = anchorColumn - this.buffer.origin.column;
+        for (let r = 0; r < this.buffer.rows; r++) {
+          for (let c = 0; c < this.buffer.columns; c++) {
+            const source = this.buffer.cells[r][c];
+            const targetRow = anchorRow + r;
+            const targetColumn = anchorColumn + c;
+            if (source.formula !== void 0) {
+              worksheet.setValue(targetRow, targetColumn, translateFormula(source.formula, dRow, dCol));
+            } else if (source.literal) {
+              worksheet.setValue(targetRow, targetColumn, source.raw ?? null, { literal: true });
+            } else {
+              worksheet.setValue(targetRow, targetColumn, source.raw ?? null);
+            }
+            if (source.style) {
+              worksheet.setStyle(toA1(targetRow, targetColumn), source.style);
+            }
           }
         }
+      } finally {
+        workbook.endUpdate();
+        history.endBatch();
       }
     }
   };
@@ -28253,34 +29386,51 @@
   var FillService = class {
     /** Extend a seed rectangle along both axes, without overwriting its cells.
      * Rows are extended first; columns then extend the resulting row patterns.
+     * The whole fill is one history transaction (F09).
      */
     fillRange(worksheet, source, target) {
       if (target.top > source.top || target.bottom < source.bottom || target.left > source.left || target.right < source.right) {
         throw new Error("Fill target must contain the source range.");
       }
-      if (target.top < source.top) this.fill(worksheet, "up", source, target.top);
-      if (target.bottom > source.bottom) this.fill(worksheet, "down", source, target.bottom);
-      const rows = { ...source, top: target.top, bottom: target.bottom };
-      if (target.left < source.left) this.fill(worksheet, "left", rows, target.left);
-      if (target.right > source.right) this.fill(worksheet, "right", rows, target.right);
+      const history = worksheet.workbook.history;
+      history.beginBatch();
+      worksheet.workbook.beginUpdate();
+      try {
+        if (target.top < source.top) this.fill(worksheet, "up", source, target.top);
+        if (target.bottom > source.bottom) this.fill(worksheet, "down", source, target.bottom);
+        const rows = { ...source, top: target.top, bottom: target.bottom };
+        if (target.left < source.left) this.fill(worksheet, "left", rows, target.left);
+        if (target.right > source.right) this.fill(worksheet, "right", rows, target.right);
+      } finally {
+        worksheet.workbook.endUpdate();
+        history.endBatch();
+      }
     }
     fill(worksheet, direction, rect, targetEnd) {
-      if (direction === "down" || direction === "up") {
-        const step2 = direction === "down" ? 1 : -1;
-        const start2 = direction === "down" ? rect.bottom + 1 : rect.top - 1;
-        for (let row = start2; direction === "down" ? row <= targetEnd : row >= targetEnd; row += step2) {
-          for (let c = rect.left; c <= rect.right; c++) {
-            worksheet.setValue(row, c, this.inferValue(worksheet, rect.top, rect.bottom, c, row - rect.top, "row"));
+      const history = worksheet.workbook.history;
+      history.beginBatch();
+      worksheet.workbook.beginUpdate();
+      try {
+        if (direction === "down" || direction === "up") {
+          const step2 = direction === "down" ? 1 : -1;
+          const start2 = direction === "down" ? rect.bottom + 1 : rect.top - 1;
+          for (let row = start2; direction === "down" ? row <= targetEnd : row >= targetEnd; row += step2) {
+            for (let c = rect.left; c <= rect.right; c++) {
+              worksheet.setValue(row, c, this.inferValue(worksheet, rect.top, rect.bottom, c, row - rect.top, "row"));
+            }
+          }
+          return;
+        }
+        const step = direction === "right" ? 1 : -1;
+        const start = direction === "right" ? rect.right + 1 : rect.left - 1;
+        for (let column = start; direction === "right" ? column <= targetEnd : column >= targetEnd; column += step) {
+          for (let r = rect.top; r <= rect.bottom; r++) {
+            worksheet.setValue(r, column, this.inferValue(worksheet, rect.left, rect.right, r, column - rect.left, "column"));
           }
         }
-        return;
-      }
-      const step = direction === "right" ? 1 : -1;
-      const start = direction === "right" ? rect.right + 1 : rect.left - 1;
-      for (let column = start; direction === "right" ? column <= targetEnd : column >= targetEnd; column += step) {
-        for (let r = rect.top; r <= rect.bottom; r++) {
-          worksheet.setValue(r, column, this.inferValue(worksheet, rect.left, rect.right, r, column - rect.left, "column"));
-        }
+      } finally {
+        worksheet.workbook.endUpdate();
+        history.endBatch();
       }
     }
     inferValue(worksheet, from, to, other, distance, axis) {
@@ -28317,9 +29467,12 @@
 
   // packages/core/src/chart-svg.ts
   function renderChartSVG(spec, data) {
-    const width = spec.width ?? 320;
-    const height = spec.height ?? 240;
-    const colors = spec.colors ?? DEFAULT_CHART_COLORS;
+    const width = clampNumber(spec.width, 320, 16, 4096);
+    const height = clampNumber(spec.height, 240, 16, 4096);
+    const colors = (spec.colors ?? DEFAULT_CHART_COLORS).map(
+      (color) => sanitizeChartColor(String(color)) ?? ""
+    ).filter((color) => color !== "");
+    const safeColors = colors.length > 0 ? colors : [...DEFAULT_CHART_COLORS];
     const padding = { top: 28, right: 12, bottom: 32, left: 44 };
     const plotW = Math.max(10, width - padding.left - padding.right);
     const plotH = Math.max(10, height - padding.top - padding.bottom);
@@ -28327,18 +29480,25 @@
     switch (spec.type) {
       case "pie":
       case "doughnut":
-        return pieSVG(spec, data, colors, title, width, height);
+        return pieSVG(spec, data, safeColors, title, width, height);
       default:
-        return cartesianSVG(spec, data, colors, title, width, height, padding, plotW, plotH);
+        return cartesianSVG(spec, data, safeColors, title, width, height, padding, plotW, plotH);
     }
   }
+  function clampNumber(value, fallback, min, max) {
+    const n = typeof value === "number" && Number.isFinite(value) ? value : fallback;
+    return Math.max(min, Math.min(max, n));
+  }
+  function clampV(v) {
+    return Number.isFinite(v) ? v : 0;
+  }
   function cartesianSVG(spec, data, colors, title, width, height, padding, plotW, plotH) {
-    const allValues = data.series.flatMap((s) => s.values);
-    const maxV = Math.max(1, ...allValues);
+    const allValues = data.series.flatMap((s) => s.values.filter((v) => v !== null));
+    const maxV = Math.max(1, ...allValues.map((v) => clampV(v)));
     const categoryCount = Math.max(1, data.categories.length);
     const bandW = plotW / categoryCount;
     const bandH = plotH / categoryCount;
-    let axes = `<line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + plotH}" stroke="currentColor" stroke-opacity="0.3"/>
+    const axes = `<line x1="${padding.left}" y1="${padding.top}" x2="${padding.left}" y2="${padding.top + plotH}" stroke="currentColor" stroke-opacity="0.3"/>
 <line x1="${padding.left}" x2="${padding.left + plotW}" y1="${padding.top + plotH}" y2="${padding.top + plotH}" stroke="currentColor" stroke-opacity="0.3"/>
 <text x="${padding.left - 4}" y="${padding.top + 4}" text-anchor="end" font-size="9" fill="currentColor" fill-opacity="0.7">${formatTick(maxV)}</text>
 <text x="${padding.left - 4}" y="${padding.top + plotH + 4}" font-size="9" fill="currentColor" fill-opacity="0.7">0</text>`;
@@ -28346,13 +29506,24 @@
     data.series.forEach((series, seriesIndex) => {
       const color = colors[seriesIndex % colors.length];
       if (spec.type === "line") {
-        const points = series.values.map((v, i) => {
+        const segments = [];
+        let current = [];
+        series.values.forEach((v, i) => {
+          if (v === null) {
+            if (current.length > 0) segments.push(current);
+            current = [];
+            return;
+          }
           const x = padding.left + bandW * i + bandW / 2;
           const y = padding.top + plotH - v / maxV * plotH;
-          return `${round(x)},${round(y)}`;
-        }).join(" ");
-        content += `<polyline points="${points}" fill="none" stroke="${color}" stroke-width="2"/>`;
+          current.push(`${round(x)},${round(y)}`);
+        });
+        if (current.length > 0) segments.push(current);
+        for (const points of segments) {
+          content += `<polyline points="${points.join(" ")}" fill="none" stroke="${color}" stroke-width="2"/>`;
+        }
         series.values.forEach((v, i) => {
+          if (v === null) return;
           const x = padding.left + bandW * i + bandW / 2;
           const y = padding.top + plotH - v / maxV * plotH;
           content += `<circle cx="${round(x)}" cy="${round(y)}" r="3" fill="${color}"/>`;
@@ -28361,6 +29532,7 @@
         const groupCount = data.series.length;
         const barW = bandW * 0.7 / groupCount;
         series.values.forEach((v, i) => {
+          if (v === null) return;
           const barH = v / maxV * plotH;
           if (spec.type === "bar") {
             const y = padding.top + bandH * i + (bandH - barW * groupCount) / 2 + barW * seriesIndex;
@@ -28381,7 +29553,7 @@
   }
   function pieSVG(spec, data, colors, title, width, height) {
     const values = data.series[0]?.values ?? [];
-    const total = values.reduce((a, b) => a + b, 0) || 1;
+    const total = values.reduce((a, b) => a + (b ?? 0), 0) || 1;
     const cx = width / 2;
     const cy = height / 2 + 6;
     const radius = Math.min(width, height) / 2 - 12;
@@ -28389,12 +29561,12 @@
     let angle = -Math.PI / 2;
     let paths = "";
     values.forEach((v, i) => {
+      if (v === null) return;
       const slice = v / total * Math.PI * 2;
       const end = angle + slice;
       paths += slicePath(cx, cy, radius, inner, angle, end, colors[i % colors.length]);
       angle = end;
     });
-    const legend = data.series[0]?.name ? `<text x="${cx}" y="${height - 6}" text-anchor="middle" font-size="10" fill="currentColor" fill-opacity="0.8">${escapeXml(data.series[0].name)}</text>` : "";
     return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">${title}${paths}</svg>`;
   }
   function slicePath(cx, cy, radius, inner, start, end, color) {
@@ -28466,6 +29638,9 @@
     mediaLayer = null;
     cellPool = [];
     activeCells = /* @__PURE__ */ new Map();
+    activeRows = /* @__PURE__ */ new Map();
+    domId;
+    disposePlugins = null;
     unlistenOperations = null;
     unlistenSelection = null;
     selectionVisible = true;
@@ -28476,6 +29651,7 @@
       this.container = container;
       this.workbook = workbook;
       this.worksheet = workbook.activeWorksheet;
+      this.domId = `ezygrid-${Math.random().toString(36).slice(2, 10)}`;
       this.options = {
         overscanRows: options.overscanRows ?? 5,
         overscanColumns: options.overscanColumns ?? 2,
@@ -28497,21 +29673,33 @@
           if (this.destroyed) return;
           switch (operation.type) {
             case "cell.set":
+            case "meta.set":
+            case "merges.set":
+            case "workbook.update":
+              break;
             case "rows.insert":
             case "rows.delete":
             case "columns.insert":
-            case "columns.delete":
-              if (operation.worksheetId !== this.worksheet.id) return;
+            case "columns.delete": {
+              if (operation.worksheetId === this.worksheet.id) {
+                const payload = operation.payload;
+                const axis = operation.type.startsWith("rows") ? "row" : "column";
+                const delta = operation.type.endsWith("insert") ? payload.count : -payload.count;
+                this.selection.transformAxis(axis, payload.index, delta);
+                this.selection.resize(this.worksheet.rowCount, this.worksheet.columnCount);
+              }
               break;
+            }
             case "undo":
             case "redo":
+              this.selection.resize(this.worksheet.rowCount, this.worksheet.columnCount);
               break;
             default:
               return;
           }
           this.render();
         });
-        this.workbook.pluginManager.run({
+        this.disposePlugins = workbook.pluginManager.attach({
           workbook: this.workbook,
           worksheet: this.worksheet,
           commands: this.commands,
@@ -28601,7 +29789,7 @@
       this.root.style.fontFamily = "var(--ezygrid-font-family, system-ui, sans-serif)";
       this.root.style.fontSize = "var(--ezygrid-font-size, 13px)";
       this.root.style.background = "var(--ezygrid-bg, #ffffff)";
-      this.root.style.color = "var(--ezygrid-text, #111111)";
+      this.root.style.color = "var(--ezygrid-text, #0f172a)";
       this.root.setAttribute("role", "grid");
       this.root.setAttribute("aria-rowcount", String(this.worksheet.rowCount));
       this.root.setAttribute("aria-colcount", String(this.worksheet.columnCount));
@@ -28639,7 +29827,7 @@
       Object.assign(this.selectionOverlay.style, {
         position: "absolute",
         boxSizing: "border-box",
-        border: "2px solid var(--ezygrid-selection, #2563eb)",
+        border: "2px solid var(--ezygrid-selection, #00c47a)",
         pointerEvents: "none",
         display: "none"
       });
@@ -28649,8 +29837,8 @@
       Object.assign(this.fillPreview.style, {
         position: "absolute",
         boxSizing: "border-box",
-        border: "2px dashed var(--ezygrid-selection, #2563eb)",
-        background: "var(--ezygrid-selection-soft, rgba(37,99,235,0.08))",
+        border: "2px dashed var(--ezygrid-selection, #00c47a)",
+        background: "var(--ezygrid-selection-soft, rgba(0,196,122,0.12))",
         pointerEvents: "none",
         zIndex: "4",
         display: "none"
@@ -28662,10 +29850,10 @@
       Object.assign(this.fillRangeLabel.style, {
         position: "absolute",
         padding: "4px 8px",
-        border: "1px solid var(--ezygrid-selection, #2563eb)",
+        border: "1px solid var(--ezygrid-selection, #00c47a)",
         borderRadius: "4px",
         background: "var(--ezygrid-bg, #fff)",
-        color: "var(--ezygrid-text, #111)",
+        color: "var(--ezygrid-text, #0f172a)",
         boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
         fontSize: "12px",
         whiteSpace: "nowrap",
@@ -28681,7 +29869,7 @@
         position: "absolute",
         width: "8px",
         height: "8px",
-        background: "var(--ezygrid-selection, #2563eb)",
+        background: "var(--ezygrid-selection, #00c47a)",
         boxShadow: "0 0 0 1px var(--ezygrid-bg, #fff)",
         zIndex: "5",
         cursor: "crosshair",
@@ -28716,9 +29904,9 @@
         left: "0",
         width: `${this.options.headerWidth}px`,
         height: `${this.options.headerHeight}px`,
-        background: "var(--ezygrid-header-bg, #f4f4f5)",
-        borderRight: "1px solid var(--ezygrid-gridline, #e4e4e7)",
-        borderBottom: "1px solid var(--ezygrid-gridline, #e4e4e7)"
+        background: "var(--ezygrid-header-bg, #e6fff4)",
+        borderRight: "1px solid var(--ezygrid-gridline, #e2e8f0)",
+        borderBottom: "1px solid var(--ezygrid-gridline, #e2e8f0)"
       });
       this.frozenTopEl = doc.createElement("div");
       this.frozenTopEl.className = "ezygrid-frozen-top";
@@ -29027,7 +30215,7 @@
         left: `${clientX}px`,
         top: `${clientY}px`,
         background: "var(--ezygrid-bg, #fff)",
-        border: "1px solid var(--ezygrid-gridline, #e4e4e7)",
+        border: "1px solid var(--ezygrid-gridline, #e2e8f0)",
         boxShadow: "0 4px 12px rgba(0,0,0,0.15)"
       });
     }
@@ -29041,7 +30229,7 @@
       const autofill = this.autofillDragging;
       this.cancelFillDrag();
       if (!source || !plan) return;
-      if (autofill) this.fill.fillRange(this.worksheet, source, plan);
+      if (autofill) this.batchHistory(() => this.fill.fillRange(this.worksheet, source, plan));
       this.selection.setActive(plan.top, plan.left);
       this.selection.extendTo(plan.bottom, plan.right);
       this.render();
@@ -29054,8 +30242,8 @@
     onMouseDown = (event) => {
       if (event.button !== 0) return;
       const target = event.target;
-      let row = target.dataset?.row;
-      let column = target.dataset?.col;
+      const row = target.dataset?.row;
+      const column = target.dataset?.col;
       if (row === void 0 || column === void 0) return;
       let r = Number(row);
       let c = Number(column);
@@ -29139,7 +30327,17 @@
         this.render();
         return;
       }
-      if (ctrl && ["c", "x", "v"].includes(event.key.toLowerCase())) return;
+      if (ctrl && ["c", "x", "v"].includes(event.key.toLowerCase())) {
+        event.preventDefault();
+        const key2 = event.key.toLowerCase();
+        if (key2 === "v") {
+          void this.pasteSelection();
+        } else {
+          this.copySelection(key2 === "x");
+          this.render();
+        }
+        return;
+      }
       if (event.key === "F2") {
         event.preventDefault();
         this.beginEditAt();
@@ -29147,7 +30345,6 @@
       }
       if (event.key === "Enter") {
         event.preventDefault();
-        const { row } = this.selection.state.active;
         this.selection.move("down", event.shiftKey, false, this.isFilled);
         this.render();
         return;
@@ -29224,6 +30421,16 @@
       this.fillRangeLabel.style.left = `${left}px`;
       this.fillRangeLabel.style.top = `${top}px`;
     }
+    /** Group a multi-cell user action into one history entry (F09). */
+    batchHistory(run) {
+      const history = this.workbook.history;
+      history.beginBatch();
+      try {
+        run();
+      } finally {
+        history.endBatch();
+      }
+    }
     clearSelectedContents() {
       const ranges = this.selection.state.ranges.map((range) => ({ ...range }));
       const cells = [];
@@ -29232,9 +30439,11 @@
           cells.push({ row, column });
         }
       });
-      for (const { row, column } of cells) {
-        this.worksheet.setValue(row, column, null);
-      }
+      this.batchHistory(() => {
+        for (const { row, column } of cells) {
+          this.worksheet.setValue(row, column, null);
+        }
+      });
     }
     commandContext() {
       return { workbook: this.workbook, worksheet: this.worksheet, selection: this.selection };
@@ -29331,7 +30540,7 @@
     };
     pasteText(text, row = this.selection.state.active.row, column = this.selection.state.active.column) {
       this.root.querySelector(".ezygrid-clipboard-status")?.remove();
-      if (text !== void 0 && (!this.clipboard.getBuffer() || text !== this.clipboard.toTSV())) {
+      if (text !== void 0 && text !== "" && (!this.clipboard.getBuffer() || text !== this.clipboard.toTSV())) {
         this.clipboard.loadTSV(text);
       }
       this.clipboard.pasteTo(this.workbook, this.worksheet, row, column);
@@ -29342,13 +30551,19 @@
       const { row, column } = this.selection.state.active;
       const clipboard = this.container.ownerDocument.defaultView?.navigator.clipboard;
       let text;
-      try {
-        text = await clipboard?.readText();
-      } catch {
+      if (clipboard?.readText) {
+        try {
+          text = await clipboard.readText();
+        } catch {
+        }
       }
       if (this.destroyed) return;
-      if (text === void 0 && !this.clipboard.getBuffer()) {
-        this.showClipboardHint();
+      if (!text) {
+        if (!this.clipboard.getBuffer()) {
+          this.showClipboardHint();
+          return;
+        }
+        this.pasteText(void 0, row, column);
         return;
       }
       this.pasteText(text, row, column);
@@ -29387,11 +30602,13 @@
         }
       }
       if (cut) {
-        for (let r = primary.top; r <= primary.bottom; r++) {
-          for (let c = primary.left; c <= primary.right; c++) {
-            this.worksheet.setValue(r, c, null);
+        this.batchHistory(() => {
+          for (let r = primary.top; r <= primary.bottom; r++) {
+            for (let c = primary.left; c <= primary.right; c++) {
+              this.worksheet.setValue(r, c, null);
+            }
           }
-        }
+        });
       }
     }
     copyTextFallback(text) {
@@ -29482,6 +30699,9 @@
           cycleReference(input);
           return;
         }
+        if (e.isComposing || e.keyCode === 229) {
+          return;
+        }
         if (e.key === "Enter") {
           e.preventDefault();
           this.editing.commit(this.worksheet, input.value);
@@ -29535,7 +30755,7 @@
       Object.assign(list.style, {
         position: "absolute",
         background: "var(--ezygrid-bg, #fff)",
-        border: "1px solid var(--ezygrid-gridline, #e4e4e7)",
+        border: "1px solid var(--ezygrid-gridline, #e2e8f0)",
         zIndex: "100",
         fontSize: "12px"
       });
@@ -29641,22 +30861,45 @@
         boxSizing: "border-box",
         overflow: "hidden",
         whiteSpace: "nowrap",
-        borderRight: "1px solid var(--ezygrid-gridline, #e4e4e7)",
-        borderBottom: "1px solid var(--ezygrid-gridline, #e4e4e7)",
+        borderRight: "1px solid var(--ezygrid-gridline, #e2e8f0)",
+        borderBottom: "1px solid var(--ezygrid-gridline, #e2e8f0)",
         padding: "0 6px",
-        lineHeight: "calc(var(--ezygrid-font-size, 13px) + 8px)"
+        lineHeight: "calc(var(--ezygrid-font-size, 13px) + 8px)",
+        pointerEvents: "auto"
       });
       return div;
     }
     placeCell(row, column, offsetX, offsetY, span) {
       const cell = this.acquireCell();
+      this.rowElementFor(row).appendChild(cell);
       this.activeCells.set(`${row},${column}`, cell);
-      this.cellLayer.appendChild(cell);
       this.paintCell(cell, row, column, offsetX, offsetY, span);
+    }
+    /** Create or reuse the accessibility row container for a visible row (F24). */
+    rowElementFor(row) {
+      let rowEl = this.activeRows.get(row);
+      if (rowEl) return rowEl;
+      const doc = this.container.ownerDocument;
+      rowEl = doc.createElement("div");
+      rowEl.className = "ezygrid-row";
+      rowEl.setAttribute("role", "row");
+      rowEl.setAttribute("aria-rowindex", String(row + 1));
+      Object.assign(rowEl.style, {
+        position: "absolute",
+        left: "0",
+        top: "0",
+        width: `${this.worksheet.columnSizes.totalSize() * this.zoom}px`,
+        height: "0",
+        pointerEvents: "none"
+      });
+      this.activeRows.set(row, rowEl);
+      this.cellLayer.appendChild(rowEl);
+      return rowEl;
     }
     /** Fill a (new or recycled) cell element with current content and state. */
     paintCell(cell, row, column, offsetX, offsetY, span) {
       const ws = this.worksheet;
+      cell.id = `${this.domId}-cell-${row}-${column}`;
       cell.dataset.row = String(row);
       cell.dataset.col = String(column);
       cell.style.left = `${offsetX}px`;
@@ -29669,6 +30912,7 @@
       this.applyCellStyle(cell, row, column);
       cell.setAttribute("role", "gridcell");
       cell.setAttribute("aria-colindex", String(column + 1));
+      cell.setAttribute("aria-rowindex", String(row + 1));
     }
     applyCellStyle(cell, row, column) {
       const style = this.worksheet.getStyle(row, column);
@@ -29679,7 +30923,7 @@
       cell.style.textDecoration = merged.underline ? "underline" : "";
       cell.style.color = merged.color ?? "";
       cell.style.textAlign = merged.align ?? "";
-      cell.style.background = merged.background ?? "";
+      this.setCellBackground(cell, merged.background ?? "");
       const table = this.worksheet.tables.at(row, column);
       if (table && row > table.range.top) {
         const bandIndex = row - (table.headerRow ? table.range.top + 1 : table.range.top);
@@ -29687,16 +30931,26 @@
         if (totalRowCell) {
           cell.style.fontWeight = "bold";
         } else if (bandIndex % 2 === 1 && !merged.background) {
-          cell.style.background = "var(--ezygrid-table-band, rgba(0,0,0,0.03))";
+          this.setCellBackground(cell, "var(--ezygrid-table-band, rgba(0,0,0,0.03))");
         }
       }
       if (this.selectionVisible && this.selection.isWithin(row, column)) {
-        cell.style.background = "var(--ezygrid-selection-soft, rgba(37,99,235,0.08))";
+        this.setCellBackground(cell, "var(--ezygrid-selection-soft, rgba(0,196,122,0.12))");
       }
       cell.setAttribute("aria-selected", this.selection.isWithin(row, column) ? "true" : "false");
       const note = this.worksheet.getNote(row, column);
       cell.title = note ?? "";
       cell.dataset.note = note !== void 0 ? "true" : "";
+    }
+    /**
+     * Assign the background through the property API: the shorthand setter
+     * cannot reliably replace an existing var() value in some DOM
+     * implementations (happy-dom), and a stale selection tint must never
+     * survive a restore.
+     */
+    setCellBackground(cell, value) {
+      cell.style.removeProperty("background");
+      if (value !== "") cell.style.setProperty("background", value);
     }
     renderFrozen() {
       this.frozenTopEl.textContent = "";
@@ -29783,11 +31037,11 @@
           boxSizing: "border-box",
           textAlign: "center",
           lineHeight: `${this.options.headerHeight}px`,
-          background: "var(--ezygrid-header-bg, #f4f4f5)",
-          color: "var(--ezygrid-header-text, #52525b)",
+          background: "var(--ezygrid-header-bg, #e6fff4)",
+          color: "var(--ezygrid-header-text, #00674a)",
           fontWeight: "bold",
-          borderRight: "1px solid var(--ezygrid-gridline, #e4e4e7)",
-          borderBottom: "1px solid var(--ezygrid-gridline, #e4e4e7)"
+          borderRight: "1px solid var(--ezygrid-gridline, #e2e8f0)",
+          borderBottom: "1px solid var(--ezygrid-gridline, #e2e8f0)"
         });
         this.colHeaderEl.appendChild(el);
       }
@@ -29808,10 +31062,10 @@
           textAlign: "right",
           paddingRight: "6px",
           lineHeight: `${this.zSizeY(r)}px`,
-          background: "var(--ezygrid-header-bg, #f4f4f5)",
-          color: "var(--ezygrid-header-text, #52525b)",
-          borderRight: "1px solid var(--ezygrid-gridline, #e4e4e7)",
-          borderBottom: "1px solid var(--ezygrid-gridline, #e4e4e7)"
+          background: "var(--ezygrid-header-bg, #e6fff4)",
+          color: "var(--ezygrid-header-text, #00674a)",
+          borderRight: "1px solid var(--ezygrid-gridline, #e2e8f0)",
+          borderBottom: "1px solid var(--ezygrid-gridline, #e2e8f0)"
         });
         this.rowHeaderEl.appendChild(el);
       }
@@ -29857,6 +31111,11 @@
     }
     renderSelection(refreshStyles = true) {
       if (this.destroyed) return;
+      const active = this.selection.state.active;
+      const activeId = `${this.domId}-cell-${active.row}-${active.column}`;
+      if (this.root.getAttribute("aria-activedescendant") !== activeId) {
+        this.root.setAttribute("aria-activedescendant", activeId);
+      }
       if (refreshStyles) {
         for (const cell of this.activeCells.values()) {
           this.applyCellStyle(cell, Number(cell.dataset.row), Number(cell.dataset.col));
@@ -29922,6 +31181,8 @@
     render() {
       if (this.destroyed) return;
       const ws = this.worksheet;
+      this.root.setAttribute("aria-rowcount", String(ws.rowCount));
+      this.root.setAttribute("aria-colcount", String(ws.columnCount));
       this.spacerEl.style.width = `${ws.columnSizes.totalSize() * this.zoom}px`;
       this.spacerEl.style.height = `${ws.rowSizes.totalSize() * this.zoom}px`;
       this.scrollRow = this.visibleRowStart();
@@ -29933,6 +31194,17 @@
           el.remove();
           this.cellPool.push(el);
           this.activeCells.delete(key2);
+        }
+      }
+      for (const [row, rowEl] of this.activeRows) {
+        const stillPopulated = [...this.activeCells.values()].some(
+          (cell) => Number(cell.dataset.row) === row
+        );
+        if (!stillPopulated) {
+          rowEl.remove();
+          this.activeRows.delete(row);
+        } else {
+          rowEl.style.width = `${ws.columnSizes.totalSize() * this.zoom}px`;
         }
       }
       const rowEnd = this.visibleRowEnd();
@@ -29977,7 +31249,7 @@
           position: "absolute",
           pointerEvents: "auto",
           background: "var(--ezygrid-bg, #fff)",
-          border: "1px solid var(--ezygrid-gridline, #e4e4e7)",
+          border: "1px solid var(--ezygrid-gridline, #e2e8f0)",
           overflow: "hidden"
         });
         this.positionFloating(wrapper, chart.anchor, chart.offsetX, chart.offsetY);
@@ -30001,7 +31273,7 @@
           img.style.height = "100%";
           el.appendChild(img);
         } else {
-          el.style.border = `1px solid ${object.stroke ?? "var(--ezygrid-gridline, #e4e4e7)"}`;
+          el.style.border = `1px solid ${object.stroke ?? "var(--ezygrid-gridline, #e2e8f0)"}`;
           el.style.background = object.fill ?? "transparent";
           el.style.color = object.textColor ?? "inherit";
           el.style.display = "flex";
@@ -30039,6 +31311,8 @@
       this.destroyed = true;
       this.formulaBarEdit = null;
       this.cancelFillDrag();
+      this.disposePlugins?.();
+      this.disposePlugins = null;
       this.unlistenOperations?.();
       this.unlistenOperations = null;
       this.unlistenSelection?.();
@@ -30075,7 +31349,7 @@
     const matches = [...value.matchAll(/(\$?)([A-Za-z]{1,3})(\$?)([0-9]{1,7})(?![A-Za-z0-9])/g)];
     const last = matches[matches.length - 1];
     if (!last) return;
-    const [, dc, letters, dr, digits] = last;
+    const [, , letters, , digits] = last;
     const states = [
       `${letters}${digits}`,
       `$${letters}$${digits}`,
@@ -30135,7 +31409,7 @@
       onReady: (workbook, renderer) => {
         const sheet = workbook.activeWorksheet;
         sheet.columnSizes.setSize(0, 160);
-        sheet.setStyle("A1:D1", { bold: true, background: "#edf3e7" });
+        sheet.setStyle("A1:D1", { bold: true, background: "#e6f7ee" });
         sheet.setNumberFormat("B2:D4", "#,##0");
         renderer.render();
         const status = document.querySelector("#status");

@@ -6,7 +6,7 @@ ExampleUI.ready(() => {
       ['Notebook', 2, 12, '=B2*C2'], ['Pen', 5, 3, '=B3*C3'],
     ] }],
   });
-  editor.workbook.activeWorksheet.setStyle('A1:D1', { bold: true, background: '#edf3e7' });
+  editor.workbook.activeWorksheet.setStyle('A1:D1', { bold: true, background: '#e6fff4' });
   editor.renderer.render();
   document.querySelector('#btn-scan').addEventListener('click', () => {
     const instances = Ezygrid.initAll();

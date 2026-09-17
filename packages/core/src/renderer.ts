@@ -258,7 +258,7 @@ export class GridRenderer {
     this.root.style.fontFamily = 'var(--ezygrid-font-family, system-ui, sans-serif)';
     this.root.style.fontSize = 'var(--ezygrid-font-size, 13px)';
     this.root.style.background = 'var(--ezygrid-bg, #ffffff)';
-    this.root.style.color = 'var(--ezygrid-text, #111111)';
+    this.root.style.color = 'var(--ezygrid-text, #0f172a)';
     this.root.setAttribute('role', 'grid');
     this.root.setAttribute('aria-rowcount', String(this.worksheet.rowCount));
     this.root.setAttribute('aria-colcount', String(this.worksheet.columnCount));
@@ -302,7 +302,7 @@ export class GridRenderer {
     Object.assign(this.selectionOverlay.style, {
       position: 'absolute',
       boxSizing: 'border-box',
-      border: '2px solid var(--ezygrid-selection, #2563eb)',
+      border: '2px solid var(--ezygrid-selection, #00c47a)',
       pointerEvents: 'none',
       display: 'none',
     } as CSSStyleDeclaration);
@@ -313,8 +313,8 @@ export class GridRenderer {
     Object.assign(this.fillPreview.style, {
       position: 'absolute',
       boxSizing: 'border-box',
-      border: '2px dashed var(--ezygrid-selection, #2563eb)',
-      background: 'var(--ezygrid-selection-soft, rgba(37,99,235,0.08))',
+      border: '2px dashed var(--ezygrid-selection, #00c47a)',
+      background: 'var(--ezygrid-selection-soft, rgba(0,196,122,0.12))',
       pointerEvents: 'none',
       zIndex: '4',
       display: 'none',
@@ -327,10 +327,10 @@ export class GridRenderer {
     Object.assign(this.fillRangeLabel.style, {
       position: 'absolute',
       padding: '4px 8px',
-      border: '1px solid var(--ezygrid-selection, #2563eb)',
+      border: '1px solid var(--ezygrid-selection, #00c47a)',
       borderRadius: '4px',
       background: 'var(--ezygrid-bg, #fff)',
-      color: 'var(--ezygrid-text, #111)',
+      color: 'var(--ezygrid-text, #0f172a)',
       boxShadow: '0 2px 6px rgba(0,0,0,0.15)',
       fontSize: '12px',
       whiteSpace: 'nowrap',
@@ -347,7 +347,7 @@ export class GridRenderer {
       position: 'absolute',
       width: '8px',
       height: '8px',
-      background: 'var(--ezygrid-selection, #2563eb)',
+      background: 'var(--ezygrid-selection, #00c47a)',
       boxShadow: '0 0 0 1px var(--ezygrid-bg, #fff)',
       zIndex: '5',
       cursor: 'crosshair',
@@ -385,9 +385,9 @@ export class GridRenderer {
       left: '0',
       width: `${this.options.headerWidth}px`,
       height: `${this.options.headerHeight}px`,
-      background: 'var(--ezygrid-header-bg, #f4f4f5)',
-      borderRight: '1px solid var(--ezygrid-gridline, #e4e4e7)',
-      borderBottom: '1px solid var(--ezygrid-gridline, #e4e4e7)',
+      background: 'var(--ezygrid-header-bg, #e6fff4)',
+      borderRight: '1px solid var(--ezygrid-gridline, #e2e8f0)',
+      borderBottom: '1px solid var(--ezygrid-gridline, #e2e8f0)',
     } as CSSStyleDeclaration);
 
     this.frozenTopEl = doc.createElement('div');
@@ -710,7 +710,7 @@ export class GridRenderer {
       left: `${clientX}px`,
       top: `${clientY}px`,
       background: 'var(--ezygrid-bg, #fff)',
-      border: '1px solid var(--ezygrid-gridline, #e4e4e7)',
+      border: '1px solid var(--ezygrid-gridline, #e2e8f0)',
       boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
     } as CSSStyleDeclaration);
   }
@@ -1317,7 +1317,7 @@ export class GridRenderer {
     Object.assign(list.style, {
       position: 'absolute',
       background: 'var(--ezygrid-bg, #fff)',
-      border: '1px solid var(--ezygrid-gridline, #e4e4e7)',
+      border: '1px solid var(--ezygrid-gridline, #e2e8f0)',
       zIndex: '100',
       fontSize: '12px',
     } as CSSStyleDeclaration);
@@ -1437,8 +1437,8 @@ export class GridRenderer {
       boxSizing: 'border-box',
       overflow: 'hidden',
       whiteSpace: 'nowrap',
-      borderRight: '1px solid var(--ezygrid-gridline, #e4e4e7)',
-      borderBottom: '1px solid var(--ezygrid-gridline, #e4e4e7)',
+      borderRight: '1px solid var(--ezygrid-gridline, #e2e8f0)',
+      borderBottom: '1px solid var(--ezygrid-gridline, #e2e8f0)',
       padding: '0 6px',
       lineHeight: 'calc(var(--ezygrid-font-size, 13px) + 8px)',
       pointerEvents: 'auto',
@@ -1533,7 +1533,7 @@ export class GridRenderer {
     // Selection is transient and takes precedence over table banding. Restore
     // the actual cell background on the next selection/focus change.
     if (this.selectionVisible && this.selection.isWithin(row, column)) {
-      this.setCellBackground(cell, 'var(--ezygrid-selection-soft, rgba(37,99,235,0.08))');
+      this.setCellBackground(cell, 'var(--ezygrid-selection-soft, rgba(0,196,122,0.12))');
     }
     cell.setAttribute('aria-selected', this.selection.isWithin(row, column) ? 'true' : 'false');
     const note = this.worksheet.getNote(row, column);
@@ -1648,11 +1648,11 @@ export class GridRenderer {
         boxSizing: 'border-box',
         textAlign: 'center',
         lineHeight: `${this.options.headerHeight}px`,
-        background: 'var(--ezygrid-header-bg, #f4f4f5)',
-        color: 'var(--ezygrid-header-text, #52525b)',
+        background: 'var(--ezygrid-header-bg, #e6fff4)',
+        color: 'var(--ezygrid-header-text, #00674a)',
         fontWeight: 'bold',
-        borderRight: '1px solid var(--ezygrid-gridline, #e4e4e7)',
-        borderBottom: '1px solid var(--ezygrid-gridline, #e4e4e7)',
+        borderRight: '1px solid var(--ezygrid-gridline, #e2e8f0)',
+        borderBottom: '1px solid var(--ezygrid-gridline, #e2e8f0)',
       } as CSSStyleDeclaration);
       this.colHeaderEl.appendChild(el);
     }
@@ -1673,10 +1673,10 @@ export class GridRenderer {
         textAlign: 'right',
         paddingRight: '6px',
         lineHeight: `${this.zSizeY(r)}px`,
-        background: 'var(--ezygrid-header-bg, #f4f4f5)',
-        color: 'var(--ezygrid-header-text, #52525b)',
-        borderRight: '1px solid var(--ezygrid-gridline, #e4e4e7)',
-        borderBottom: '1px solid var(--ezygrid-gridline, #e4e4e7)',
+        background: 'var(--ezygrid-header-bg, #e6fff4)',
+        color: 'var(--ezygrid-header-text, #00674a)',
+        borderRight: '1px solid var(--ezygrid-gridline, #e2e8f0)',
+        borderBottom: '1px solid var(--ezygrid-gridline, #e2e8f0)',
       } as CSSStyleDeclaration);
       this.rowHeaderEl.appendChild(el);
     }
@@ -1908,7 +1908,7 @@ export class GridRenderer {
         position: 'absolute',
         pointerEvents: 'auto',
         background: 'var(--ezygrid-bg, #fff)',
-        border: '1px solid var(--ezygrid-gridline, #e4e4e7)',
+        border: '1px solid var(--ezygrid-gridline, #e2e8f0)',
         overflow: 'hidden',
       } as CSSStyleDeclaration);
       this.positionFloating(wrapper, chart.anchor, chart.offsetX, chart.offsetY);
@@ -1932,7 +1932,7 @@ export class GridRenderer {
         img.style.height = '100%';
         el.appendChild(img);
       } else {
-        el.style.border = `1px solid ${object.stroke ?? 'var(--ezygrid-gridline, #e4e4e7)'}`;
+        el.style.border = `1px solid ${object.stroke ?? 'var(--ezygrid-gridline, #e2e8f0)'}`;
         el.style.background = object.fill ?? 'transparent';
         el.style.color = object.textColor ?? 'inherit';
         el.style.display = 'flex';

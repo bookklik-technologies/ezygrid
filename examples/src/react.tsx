@@ -22,7 +22,7 @@ function App() {
     onReady: (workbook, renderer) => {
       const sheet = workbook.activeWorksheet;
       sheet.columnSizes.setSize(0, 160);
-      sheet.setStyle('A1:D1', { bold: true, background: '#edf3e7' });
+      sheet.setStyle('A1:D1', { bold: true, background: '#e6f7ee' });
       sheet.setNumberFormat('B2:D4', '#,##0');
       renderer.render();
       const status = document.querySelector('#status');

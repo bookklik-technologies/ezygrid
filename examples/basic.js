@@ -15,9 +15,9 @@ ExampleUI.ready(() => {
   });
   const sheet = editor.workbook.activeWorksheet;
   sheet.columnSizes.setSize(0, 160);
-  sheet.setStyle('A1:D1', { bold: true, background: '#edf3e7' });
-  sheet.setStyle('A5:D5', { bold: true, background: '#f1f5ed' });
-  sheet.setStyle('D2:D5', { color: '#176b50', bold: true });
+  sheet.setStyle('A1:D1', { bold: true, background: '#e6fff4' });
+  sheet.setStyle('A5:D5', { bold: true, background: '#f0faf7' });
+  sheet.setStyle('D2:D5', { color: '#00875a', bold: true });
   sheet.setNumberFormat('B2:D5', '#,##0');
   sheet.setNumberFormat('B7:B8', '#,##0');
   editor.renderer.render();

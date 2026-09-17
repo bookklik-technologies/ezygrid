@@ -4,11 +4,11 @@
   --ezygrid-font-family: system-ui, sans-serif;
   --ezygrid-font-size: 13px;
   --ezygrid-bg: #ffffff;
-  --ezygrid-text: #111111;
-  --ezygrid-gridline: #e4e4e7;
-  --ezygrid-selection: #2563eb;
-  --ezygrid-selection-soft: rgba(37, 99, 235, 0.08);
-  --ezygrid-header-bg: #f4f4f5;
-  --ezygrid-header-text: #52525b;
-  --ezygrid-table-band: rgba(0, 0, 0, 0.03);
+  --ezygrid-text: #0f172a;
+  --ezygrid-gridline: #e2e8f0;
+  --ezygrid-selection: #00c47a;
+  --ezygrid-selection-soft: rgba(0, 196, 122, 0.12);
+  --ezygrid-header-bg: #e6fff4;
+  --ezygrid-header-text: #00674a;
+  --ezygrid-table-band: rgba(0, 196, 122, 0.06);
 }
