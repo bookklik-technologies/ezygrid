@@ -30,6 +30,15 @@ Guidance for contributors and coding agents working on this repository's documen
 - Ezygrid brand styles (mint `#00FF99` / blue `#2563EB` palette, gradients, button colors) live only in `docs/.vitepress/theme/custom.css`. The official brand assets are `logo.svg` (navbar + home hero) and `icon.svg` (favicon), copied from the repository root into `docs/public/` and referenced as `/ezygrid/logo.svg` and `/ezygrid/icon.svg`.
 - Never alter palette values, brand assets, or the deployment base path (`/ezygrid/`) during standardization. Favicon and logo links must resolve beneath the base path.
 
+## Examples standard
+
+The `examples/` folder follows the shared Ezy examples standard:
+
+- One self-contained HTML file per concept: `declarative.html` (zero-JS embed via data-attributes), `programmatic.html` (constructor via the local bundle), `events.html` (core lifecycle/data events), and `advanced.html` (one library-specific showcase — for Ezygrid: toolbar, validation, conditional formats, CSV export).
+- `examples/README.md` lists the four examples and the build command. No `index.html`, no shared CSS/JS, no gallery chrome, no framework bundles (framework integrations are documented under `docs/` instead).
+- Per-file rules: identical skeleton (`<!doctype html>`, `lang="en"`, charset, viewport, title `<Library> - <Feature>`); inline `<style>` limited to host sizing; host `<div id="app">` or attribute-marked host; local build loaded via relative path at the end of `<body>`; inline `<script>` using only the public API (2-space indent, semicolons); `window.editor = editor` debug export in programmatic examples; at most one or two clarifying comments.
+- Keep examples minimal: one library feature per file. Do not reintroduce shared demo helpers, copy buttons or a landing page.
+
 ## Page templates
 
 - Home page: frontmatter `layout: home` and `titleTemplate: false`; hero actions in order **Get started → API reference → View on GitHub**; the six existing feature cards.

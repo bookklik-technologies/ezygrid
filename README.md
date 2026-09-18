@@ -47,7 +47,7 @@ The loader fetches separate dependency files and enables declarative startup
 automatically. No consumer bundling step is required. Build the distribution
 from this repository with `pnpm build`.
 See [Getting started](docs/getting-started.md) for configuration, lifecycle, and dynamic hosts,
-and the [example gallery](examples/index.html) for runnable demos.
+and the [examples folder](examples/README.md) for runnable demos.
 
 ## Status
 

@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ezygrid - Events</title>
+</head>
+<body>
+  <div id="editor" style="height: 460px"></div>
+  <p id="log" style="font-family: monospace; white-space: pre-wrap"></p>
+
+  <script src="../packages/core/dist/browser/ezygrid.js"></script>
+  <script>
+    // workbook.onOperation fires for every edit, so totals stay in sync.
+    Ezygrid.ready.then(() => {
+      const editor = new Ezygrid({
+        target: '#editor',
+        worksheets: [
+          { name: 'Sales', data: [
+            ['Month', 'Revenue', 'Cost', 'Profit'],
+            ['January', 12000, 7000, '=B2-C2'],
+            ['February', 15000, 8000, '=B3-C3'],
+            ['March', 9000, 5000, '=B4-C4'],
+            ['Q1 total', '=SUM(B2:B4)', '=SUM(C2:C4)', '=B5-C5'],
+          ] },
+        ],
+      });
+      const sheet = editor.workbook.activeWorksheet;
+      sheet.setStyle('A1:D1', { bold: true, background: '#e6fff4' });
+      sheet.setNumberFormat('B2:D5', '#,##0');
+      editor.renderer.render();
+
+      const log = document.querySelector('#log');
+      editor.workbook.onOperation((op) => {
+        const profit = sheet.getValue(4, 3);
+        log.textContent = `Last operation: ${op.type}. Profit total: ${Number(profit).toLocaleString('en')}`;
+      });
+
+      window.editor = editor;
+    }).catch(console.error);
+  </script>
+</body>
+</html>

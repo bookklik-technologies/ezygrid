@@ -52,10 +52,9 @@ import '@ezygrid/theme-default/index.css'; // or '@ezygrid/theme-dark/index.css'
 
 ```bash
 pnpm test        # vitest run (unit + DOM tests)
-pnpm build       # tsc project references for all packages
+pnpm build       # tsc project references for all packages + browser loader
 pnpm typecheck   # tsc --build
 pnpm lint        # eslint
-pnpm examples:build  # builds the example gallery + browser distribution
 ```
 
 TypeScript configuration is strict (`ES2022` target, `noUncheckedIndexedAccess`).

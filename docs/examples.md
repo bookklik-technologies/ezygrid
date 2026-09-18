@@ -1,22 +1,21 @@
 # Examples
 
-The repository ships an interactive gallery of runnable demos using the standalone browser loader (`examples/` folder). Run the dev server or open the built gallery to explore them.
+The repository ships runnable demos using the standalone browser loader (`examples/` folder). Each example is a single self-contained HTML file; build the distribution and open the files directly or serve the repository root.
 
-| Demo | Shows |
-| --- | --- |
-| [Initialization](https://github.com/bookklik-technologies/ezygrid/tree/main/examples/initialization.html) | Declarative host vs constructor, `Ezygrid.initAll()` rescans preserving edits, styling a header row |
-| [Formulas](https://github.com/bookklik-technologies/ezygrid/tree/main/examples/basic.html) | Two sheets, cross-sheet references, `SUM`, number formats, column sizes, live recalculation via `workbook.onOperation` |
-| [Inventory](https://github.com/bookklik-technologies/ezygrid/tree/main/examples/full.html) | Toolbar + formula bar, validation, conditional formats, structured tables, column chart, textbox shape, CSV download |
-| [Lifecycle](https://github.com/bookklik-technologies/ezygrid/tree/main/examples/initialization-global.html) | Browser loader, `Ezygrid.getInstance`, `destroy()` and re-`initAll` |
-| [React](https://github.com/bookklik-technologies/ezygrid/tree/main/examples/react.html) | First-party React `<Spreadsheet>` with `onReady` styling |
+| Example | File | Shows |
+| --- | --- | --- |
+| Declarative embed | [declarative.html](https://github.com/bookklik-technologies/ezygrid/tree/main/examples/declarative.html) | Zero-JS startup via `data-ezg-editor` |
+| Programmatic embed | [programmatic.html](https://github.com/bookklik-technologies/ezygrid/tree/main/examples/programmatic.html) | Constructor with `worksheets`, header styling after `Ezygrid.ready` |
+| Events | [events.html](https://github.com/bookklik-technologies/ezygrid/tree/main/examples/events.html) | `workbook.onOperation` live recalculation |
+| Advanced sheet | [advanced.html](https://github.com/bookklik-technologies/ezygrid/tree/main/examples/advanced.html) | Toolbar + formula bar, validation, conditional formats, tables, CSV export |
 
 ## Running locally
 
 ```bash
-pnpm examples:build   # builds the gallery + browser distribution
+pnpm build   # generates packages/core/dist/browser/
 ```
 
-Serve the repository root with any static file server and open `examples/index.html`.
+Serve the repository root with any static file server and open `examples/declarative.html`.
 
 ## Key snippets
 

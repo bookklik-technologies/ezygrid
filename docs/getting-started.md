@@ -74,7 +74,7 @@ The browser distribution contains a small loader and separate JavaScript depende
 
 The ordinary script tag exposes `window.Ezygrid` immediately and loads dependencies relative to its own URL. `Ezygrid.ready` resolves with the constructor after the files and DOM are ready and declarative startup has completed. Always wait for it before construction, lookup, or scanning. Construction before readiness throws a descriptive error. Failed file requests or module initialization reject the promise; handle the rejection to show an error in your application. Repeated loader tags reuse the same constructor and readiness promise, without loading the library twice.
 
-There is no consumer bundling step, import map, runtime package manager, or CDN dependency. Repository contributors generate the distribution with `pnpm build`; `pnpm examples:build` also generates it alongside the existing demos. The loader is exported as `@ezygrid/core/browser`, with typings for the browser global and its readiness promise. For TypeScript script consumers, include `@ezygrid/core/browser` in `compilerOptions.types`. Normal package imports keep their synchronous API and do not require `ready`.
+There is no consumer bundling step, import map, runtime package manager, or CDN dependency. Repository contributors generate the distribution with `pnpm build`. The loader is exported as `@ezygrid/core/browser`, with typings for the browser global and its readiness promise. For TypeScript script consumers, include `@ezygrid/core/browser` in `compilerOptions.types`. Normal package imports keep their synchronous API and do not require `ready`.
 
 Use either the script loader or package imports on a page to keep one instance registry.
 

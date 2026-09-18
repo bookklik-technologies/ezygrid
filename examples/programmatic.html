@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ezygrid - Programmatic embed</title>
+</head>
+<body>
+  <div id="editor" style="height: 460px"></div>
+
+  <script src="../packages/core/dist/browser/ezygrid.js"></script>
+  <script>
+    // The browser loader exposes the global Ezygrid namespace and a readiness promise.
+    Ezygrid.ready.then(() => {
+      const editor = new Ezygrid({
+        target: '#editor',
+        worksheets: [
+          { name: 'Order', data: [
+            ['Item', 'Quantity', 'Unit price', 'Total'],
+            ['Notebook', 2, 12, '=B2*C2'],
+            ['Pen', 5, 3, '=B3*C3'],
+          ] },
+        ],
+      });
+      const sheet = editor.workbook.activeWorksheet;
+      sheet.setStyle('A1:D1', { bold: true, background: '#e6fff4' });
+      editor.renderer.render();
+
+      window.editor = editor;
+    }).catch(console.error);
+  </script>
+</body>
+</html>

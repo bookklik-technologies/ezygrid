@@ -4,7 +4,7 @@ The browser distribution lets you use Ezygrid with **no bundler, no import map, 
 
 ## Setup
 
-1. Build the distribution in the repository: `pnpm build` (or `pnpm examples:build`).
+1. Build the distribution in the repository: `pnpm build`.
 2. Copy the **entire** `packages/core/dist/browser/` directory to your static assets, preserving layout (e.g. to `/ezygrid/`).
 
 ```html

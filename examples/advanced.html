@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ezygrid - Advanced sheet</title>
+</head>
+<body>
+  <div id="editor" style="height: 520px"></div>
+  <p><button type="button" id="download">Download CSV</button></p>
+
+  <script src="../packages/core/dist/browser/ezygrid.js"></script>
+  <script>
+    // Built-in toolbar and formula bar, validation, conditional formats and CSV export.
+    Ezygrid.ready.then(() => {
+      const editor = new Ezygrid({
+        target: '#editor',
+        renderer: { toolbar: true, formulaBar: true },
+        worksheets: [
+          { name: 'Inventory', data: [
+            ['SKU', 'Item', 'Qty', 'Price', 'Status'],
+            ['A-100', 'Widget', 25, 4.5, 'in stock'],
+            ['A-101', 'Gadget', 3, 19.99, 'low'],
+            ['B-200', 'Sprocket', 120, 2.25, 'in stock'],
+          ] },
+        ],
+      });
+      const sheet = editor.workbook.activeWorksheet;
+      sheet.setStyle('A1:E1', { bold: true, background: '#e6fff4' });
+      sheet.setNumberFormat('D2:D4', '#,##0.00');
+      sheet.addValidation({ range: 'C2:C50', type: 'number', action: 'reject', min: 0, max: 1000 });
+      sheet.conditionalFormats.add({ range: 'E2:E50', type: 'containsText', text: 'low', style: { background: '#fff2ce', color: '#78540a' }, priority: 1 });
+      sheet.addTable({ name: 'InventoryTable', range: 'A1:E4' });
+      editor.renderer.render();
+
+      document.querySelector('#download').addEventListener('click', () => {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(new Blob([sheet.toCsv({ escapeFormulas: true })], { type: 'text/csv;charset=utf-8' }));
+        link.download = 'inventory.csv';
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+      });
+
+      window.editor = editor;
+    }).catch(console.error);
+  </script>
+</body>
+</html>
