@@ -6,15 +6,15 @@
   <title>Ezygrid - Events</title>
 </head>
 <body>
-  <div id="editor" style="height: 460px"></div>
-  <p id="log" style="font-family: monospace; white-space: pre-wrap"></p>
+  <div id="app" style="height: 640px"></div>
+  <output id="log"></output>
 
   <script src="../packages/core/dist/browser/ezygrid.js"></script>
   <script>
     // workbook.onOperation fires for every edit, so totals stay in sync.
     Ezygrid.ready.then(() => {
       const editor = new Ezygrid({
-        target: '#editor',
+        target: '#app',
         worksheets: [
           { name: 'Sales', data: [
             ['Month', 'Revenue', 'Cost', 'Profit'],
@@ -32,7 +32,7 @@
 
       const log = document.querySelector('#log');
       editor.workbook.onOperation((op) => {
-        const profit = sheet.getValue(4, 3);
+        const profit = editor.workbook.getWorksheet('Sales')?.getValue(4, 3);
         log.textContent = `Last operation: ${op.type}. Profit total: ${Number(profit).toLocaleString('en')}`;
       });
 

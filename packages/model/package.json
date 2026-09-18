@@ -1,6 +1,6 @@
 {
   "name": "@ezygrid/model",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Coordinates, ranges, A1 utilities, sparse store, and viewport index for Ezygrid.",
   "license": "MIT",
   "author": {

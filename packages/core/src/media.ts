@@ -30,13 +30,13 @@ export class MediaStore {
   private objects: MediaObject[] = [];
 
   addImage(image: Omit<ImageMedia, 'id' | 'kind'>): ImageMedia {
-    const full: ImageMedia = { ...image, kind: 'image', id: createId('media') };
+    const full: ImageMedia = { ...image, kind: 'image', id: (image as Partial<ImageMedia>).id ?? createId('media') };
     this.objects.push(full);
     return full;
   }
 
   addShape(shape: Omit<ShapeMedia, 'id' | 'kind'>): ShapeMedia {
-    const full: ShapeMedia = { ...shape, kind: 'shape', id: createId('media') };
+    const full: ShapeMedia = { ...shape, kind: 'shape', id: (shape as Partial<ShapeMedia>).id ?? createId('media') };
     this.objects.push(full);
     return full;
   }

@@ -22,7 +22,8 @@ import { Workbook, createGrid } from '@ezygrid/core';
 | `history: HistoryService` | Undo/redo service |
 | `definedNames: Map<string, DefinedNameDefinition>` | Named ranges/values |
 | `pluginManager: PluginManager` | Plugin lifecycle |
-| `activeWorksheet: Worksheet` | Currently `worksheets[0]` |
+| `activeWorksheet: Worksheet` | Active worksheet; defaults to the first sheet |
+| `filename: string` | Download filename, initially `Untitled workbook` |
 
 ## Methods
 
@@ -32,6 +33,10 @@ uniqueSheetName(desired: string, exclude?: string): string;
 
 addWorksheet(config?: WorksheetConfig): Worksheet;
 removeWorksheet(id: string): void;      // cannot remove the last sheet
+setActiveWorksheet(id: string): void;
+moveWorksheet(id: string, index: number): void; // zero-based destination
+transaction(action: () => void): void; // synchronous, reversible, rolls back on failure
+loadJSON(data: unknown): void; // replaces contents, preserves this instance, clears history
 
 onOperation(listener: (op: Operation) => void): () => void;
 
@@ -64,6 +69,6 @@ type DefinedNameDefinition =
 ## History semantics
 
 - Every reversible mutation records forward + inverse operations.
-- `beginUpdate()`/`endUpdate()` collapses a group into one entry.
+- `beginUpdate()`/`endUpdate()` batches notifications; `transaction()` creates one reversible editor action.
 - Replay never re-records; history is transformed on row/column shifts.
 - `fromJSON` starts with a clean history.

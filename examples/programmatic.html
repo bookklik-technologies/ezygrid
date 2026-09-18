@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Ezygrid - Programmatic embed</title>
 </head>
-<body>
-  <div id="editor" style="height: 460px"></div>
+<body style="margin: 0">
+  <div id="editor" style="height: 100dvh"></div>
 
   <script src="../packages/core/dist/browser/ezygrid.js"></script>
   <script>
@@ -14,6 +14,7 @@
     Ezygrid.ready.then(() => {
       const editor = new Ezygrid({
         target: '#editor',
+        filename: 'Orders',
         worksheets: [
           { name: 'Order', data: [
             ['Item', 'Quantity', 'Unit price', 'Total'],

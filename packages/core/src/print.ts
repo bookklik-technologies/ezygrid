@@ -93,15 +93,26 @@ function rowsHtml(
     const cells: string[] = [];
     for (let c = used.left; c <= used.right; c++) {
       const value = sheet.getValue(r, c);
-      const style = sheet.getStyle(r, c);
+      if (sheet.merges.isCovered(r, c)) continue;
+      const merge = sheet.merges.findAt(r, c);
+      const style = { ...sheet.getStyle(r, c), ...sheet.conditionalFormats.evaluate(sheet, r, c) };
       const styles: string[] = [];
       if (style?.bold) styles.push('font-weight:bold');
       if (style?.italic) styles.push('font-style:italic');
       if (style?.color) styles.push(`color:${style.color}`);
       if (style?.background) styles.push(`background:${style.background}`);
       if (style?.align) styles.push(`text-align:${style.align}`);
+      if (style?.underline) styles.push('text-decoration:underline');
+      if (style?.fontFamily) styles.push(`font-family:${style.fontFamily}`);
+      if (style?.fontSize) styles.push(`font-size:${style.fontSize}px`);
+      styles.push(`white-space:${style?.wrap ? 'pre-wrap' : 'pre'}`, `vertical-align:${style?.verticalAlign ?? 'top'}`, `height:${sheet.rowSizes.sizeOf(r)}px`, `width:${sheet.columnSizes.sizeOf(c)}px`);
+      for (const edge of ['top', 'right', 'bottom', 'left'] as const) {
+        const border = style?.borders?.[edge];
+        if (border) styles.push(`border-${edge}:${border.width}px ${border.style} ${border.color}`);
+        else if (border === null) styles.push(`border-${edge}:none`);
+      }
       cells.push(
-        `<td style="${escapeHtml(styles.join(';'))}">${escapeHtml(formatValue(value, sheet.getNumberFormat(r, c)))}</td>`,
+        `<td${merge ? ` rowspan="${merge.bottom - merge.top + 1}" colspan="${merge.right - merge.left + 1}"` : ''} style="${escapeHtml(styles.join(';'))}">${escapeHtml(formatValue(value, sheet.getNumberFormat(r, c)))}</td>`,
       );
     }
     void gridlines;

@@ -1,6 +1,6 @@
 {
   "name": "@ezygrid/theme-default",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Default light theme for Ezygrid (CSS variables only)",
   "license": "MIT",
   "author": {

@@ -62,12 +62,22 @@ export interface WorksheetConfig {
 
 /** Cell-level style properties (§23.2 subset for Phase 2). */
 export interface CellStyle {
+  fontFamily?: string;
+  fontSize?: number;
+  wrap?: boolean;
+  verticalAlign?: 'top' | 'middle' | 'bottom';
+  borders?: Partial<Record<'top' | 'right' | 'bottom' | 'left', { color: string; width: number; style: 'solid' | 'dashed' | 'dotted' } | null>>;
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;
   color?: string;
   background?: string;
   align?: 'left' | 'center' | 'right';
+}
+
+export interface FilterCriteria {
+  operator: 'equals' | 'contains' | 'gt' | 'lt' | 'notEmpty';
+  value?: string;
 }
 
 export const DEFAULT_ROW_HEIGHT = 24;
@@ -79,7 +89,11 @@ export const DEFAULT_COLUMN_WIDTH = 100;
  */
 export class Worksheet {
   readonly id: string;
-  readonly workbook: Workbook;
+  workbook: Workbook;
+  freezeRows = 0;
+  freezeColumns = 0;
+  readonly pivotSpecs: import('./pivot.js').PivotSpec[] = [];
+  readonly filterCriteria = new Map<number, FilterCriteria>();
   readonly cells = new SparseCellStore();
   readonly rowSizes: SizeIndex;
   readonly columnSizes: SizeIndex;
@@ -145,6 +159,7 @@ export class Worksheet {
   addPivot(spec: Omit<import('./pivot.js').PivotSpec, 'id'>): string {
     const full = { ...spec, id: createId('pivot') };
     this.pivots.refresh(this, full);
+    this.pivotSpecs.push(full);
     return full.id;
   }
 
@@ -230,14 +245,34 @@ export class Worksheet {
   private filterHiddenRows = new Set<number>();
 
   setFilter(column: number, predicate: (value: unknown) => boolean): void {
+    this.filterCriteria.delete(column);
     this.filters.set(column, predicate);
     this.applyFilters();
   }
 
   clearFilter(column?: number): void {
+    if (column === undefined) this.filterCriteria.clear();
+    else this.filterCriteria.delete(column);
     if (column === undefined) this.filters.clear();
     else this.filters.delete(column);
     this.applyFilters();
+  }
+
+  setFilterCriteria(column: number, criteria: FilterCriteria): void {
+    if (!Number.isInteger(column) || column < 0 || column >= this.columnCount) throw new Error('invalid filter column');
+    const predicate = (value: unknown): boolean => {
+      const text = String(value ?? '');
+      switch (criteria.operator) {
+        case 'equals': return text === (criteria.value ?? '');
+        case 'contains': return text.toLowerCase().includes((criteria.value ?? '').toLowerCase());
+        case 'gt': return Number(value) > Number(criteria.value);
+        case 'lt': return Number(value) < Number(criteria.value);
+        case 'notEmpty': return text !== '';
+        default: return true;
+      }
+    };
+    this.setFilter(column, predicate);
+    this.filterCriteria.set(column, { ...criteria });
   }
 
   /** Re-evaluate filters after data or formula changes (F19). */
@@ -1029,6 +1064,7 @@ export class Worksheet {
 }
 
 export interface WorkbookOptions {
+  filename?: string;
   id?: string;
   worksheets?: WorksheetConfig[];
   /** Plugins (§44) run when a grid renderer attaches. */
@@ -1041,6 +1077,9 @@ export type DefinedNameDefinition =
 
 /** Workbook: owns worksheets, formula graph, history and operation events. */
 export class Workbook {
+  filename: string;
+  private activeSheetId?: string;
+  private transactionDepth = 0;
   readonly id: string;
   readonly worksheets: Worksheet[] = [];
   readonly formulaGraph = new DependencyGraph();
@@ -1052,8 +1091,10 @@ export class Workbook {
   /** Update-transaction state for batched notifications (F02). */
   private updateDepth = 0;
   private suppressedOps = 0;
+  private pendingOperations: Operation[] = [];
 
   constructor(options: WorkbookOptions = {}) {
+    this.filename = options.filename ?? 'Untitled workbook';
     this.id = options.id ?? createId('wb');
     this.pluginManager = new PluginManager(options.extensions ?? []);
     for (const config of options.worksheets ?? []) {
@@ -1175,7 +1216,87 @@ export class Workbook {
   }
 
   get activeWorksheet(): Worksheet {
-    return this.worksheets[0]!;
+    return this.worksheets.find((sheet) => sheet.id === this.activeSheetId) ?? this.worksheets[0]!;
+  }
+
+  setActiveWorksheet(id: string): void {
+    const sheet = this.getWorksheet(id);
+    if (!sheet) throw new Error(`worksheet not found: ${id}`);
+    if (sheet === this.activeWorksheet) return;
+    this.activeSheetId = sheet.id;
+    this.emitOperation(op(this.id, 'worksheet.activate', { id: sheet.id }, sheet.id));
+  }
+
+  moveWorksheet(id: string, index: number): void {
+    const sheet = this.getWorksheet(id);
+    if (!sheet || !Number.isInteger(index) || index < 0 || index >= this.worksheets.length) {
+      throw new Error('invalid worksheet position');
+    }
+    this.transaction(() => {
+      this.worksheets.splice(this.worksheets.indexOf(sheet), 1);
+      this.worksheets.splice(index, 0, sheet);
+    });
+  }
+
+  /** One reversible editor action, including feature metadata; failures roll back. */
+  transaction(action: () => void): void {
+    if (this.transactionDepth > 0) { action(); return; }
+    const before = this.captureDocument();
+    this.transactionDepth++;
+    this.beginUpdate();
+    try {
+      action();
+      const after = this.captureDocument();
+      this.history.push(op(this.id, 'document.restore', after), op(this.id, 'document.restore', before));
+      this.suppressedOps++;
+    } catch (error) {
+      this.restoreDocument(before);
+      this.pendingOperations = [];
+      this.suppressedOps++;
+      throw error;
+    } finally {
+      this.transactionDepth--;
+      this.endUpdate();
+    }
+  }
+
+  private captureDocument(): Record<string, unknown> {
+    const snapshot = this.toJSON();
+    // Runtime history preserves callbacks even though exported JSON cannot.
+    const sheets = snapshot.worksheets as Record<string, unknown>[];
+    this.worksheets.forEach((sheet, index) => {
+      sheets[index]!.validations = sheet.validations.all().map((rule) => ({ ...rule }));
+      sheets[index]!.conditionalFormats = sheet.conditionalFormats.all().map((rule) => ({ ...rule, style: { ...rule.style } }));
+      sheets[index]!.runtimeFilters = [...sheet.filters].filter(([column]) => !sheet.filterCriteria.has(column));
+    });
+    return cloneSnapshot(snapshot);
+  }
+
+  /** Replace a validated document while retaining this workbook and its listeners. */
+  loadJSON(data: unknown): void {
+    const staged = Workbook.fromJSON(data);
+    this.adoptDocument(staged);
+    this.history.clear();
+    this.emitOperation(op(this.id, 'document.load', {}));
+  }
+
+  private restoreDocument(data: unknown): void {
+    this.adoptDocument(Workbook.fromJSON(data));
+  }
+
+  private adoptDocument(staged: Workbook): void {
+    const activeId = staged.activeWorksheet.id;
+    const sheets = staged.worksheets.map((sheet) => {
+      sheet.workbook = this;
+      const existing = this.getWorksheet(sheet.id);
+      return existing ? Object.assign(existing, sheet) : sheet;
+    });
+    this.worksheets.splice(0, this.worksheets.length, ...sheets);
+    this.filename = staged.filename;
+    this.activeSheetId = activeId;
+    this.definedNames.clear();
+    for (const [name, definition] of staged.definedNames) this.definedNames.set(name, definition);
+    this.refreshFormulaGraph();
   }
 
   /**
@@ -1209,11 +1330,13 @@ export class Workbook {
       });
     }
     this.refreshFormulaGraph();
+    this.emitOperation(op(this.id, 'worksheet.rename', { previous, next }, sheet.id));
   }
 
   addWorksheet(config: WorksheetConfig = {}): Worksheet {
     const sheet = new Worksheet(this, config);
     this.worksheets.push(sheet);
+    this.emitOperation(op(this.id, 'worksheet.add', {}, sheet.id));
     return sheet;
   }
 
@@ -1227,6 +1350,7 @@ export class Workbook {
     this.formulaGraph.removeSheet(removed.name);
     this.worksheets.splice(index, 1);
     this.refreshFormulaGraph();
+    this.emitOperation(op(this.id, 'worksheet.remove', {}, id));
   }
 
   onOperation(listener: (op: Operation) => void): () => void {
@@ -1249,6 +1373,8 @@ export class Workbook {
     this.updateDepth = Math.max(0, this.updateDepth - 1);
     if (this.updateDepth > 0) return;
     const count = this.suppressedOps;
+    const operations = this.pendingOperations;
+    this.pendingOperations = [];
     this.suppressedOps = 0;
     if (count === 0) return;
     const reference = this.activeWorksheet;
@@ -1258,17 +1384,18 @@ export class Workbook {
         workbookId: this.id,
         worksheetId: reference?.id,
         type: 'workbook.update',
-        payload: { count },
+        payload: { count, operations },
         timestamp: Date.now(),
       });
     }
   }
 
   emitOperation(operation: Operation, inverse?: Operation[]): void {
-    this.recordWithInverse(operation, inverse);
+    if (!this.transactionDepth) this.recordWithInverse(operation, inverse);
     // Inside an update transaction listeners get one aggregated event (F02).
     if (this.updateDepth > 0) {
       this.suppressedOps += 1;
+      this.pendingOperations.push(operation);
       return;
     }
     for (const listener of this.listeners) listener(operation);
@@ -1414,6 +1541,9 @@ export class Workbook {
   /** Replay a stored history operation (cell, bulk or structural). */
   private applyHistoryOperation(operation: Operation): void {
     switch (operation.type) {
+      case 'document.restore':
+        this.restoreDocument(operation.payload);
+        break;
       case 'cell.set':
         this.applyCellSet(operation.payload as import('@ezygrid/model').SetCellPayload, operation.worksheetId);
         break;
@@ -1500,6 +1630,7 @@ export class Workbook {
    * references point at the changed sheet (F07).
    */
   transformHistory(sheetId: string, kind: 'row' | 'column', at: number, delta: number): void {
+    if (this.transactionDepth) return;
     const targetSheet = this.worksheets.find((w) => w.id === sheetId);
     if (!targetSheet) return;
     const shift: RefTransform = { kind, at, delta };
@@ -1614,6 +1745,8 @@ export class Workbook {
       format: 'ezygrid',
       version: 2,
       id: this.id,
+      filename: this.filename,
+      activeWorksheetId: this.activeWorksheet.id,
       definedNames: [...this.definedNames.entries()]
         .filter(([, definition]) => definition.type === 'range' || (definition.type === 'value' && typeof definition.value !== 'function'))
         .map(([name, definition]) => ({ name, definition })),
@@ -1642,6 +1775,10 @@ export class Workbook {
           columnSizes: [...sheet.columnSizes.getCustomSizes().entries()],
           rowGroups: [...sheet.getGroups()],
           nestedHeaders: sheet.nestedHeaders.map((level) => [...level]),
+          filterCriteria: [...sheet.filterCriteria],
+          freezeRows: sheet.freezeRows,
+          freezeColumns: sheet.freezeColumns,
+          pivots: sheet.pivotSpecs.map((spec) => ({ ...spec, rows: [...spec.rows], values: spec.values.map((value) => ({ ...value })) })),
           tables: sheet.tables.all().map((table) => ({
             name: table.name,
             range: rectToRange(table.range),
@@ -1670,6 +1807,8 @@ export class Workbook {
       format?: unknown;
       version?: unknown;
       id?: unknown;
+      filename?: unknown;
+      activeWorksheetId?: unknown;
       definedNames?: unknown;
       worksheets?: unknown;
     };
@@ -1681,6 +1820,7 @@ export class Workbook {
     }
     const worksheetSnapshots = Array.isArray(snapshot.worksheets) ? snapshot.worksheets : [];
     const workbook = new Workbook({
+      filename: typeof snapshot.filename === 'string' ? snapshot.filename : undefined,
       id: typeof snapshot.id === 'string' ? snapshot.id : undefined,
       worksheets: worksheetSnapshots.map((raw: any) => ({
         id: typeof raw?.id === 'string' ? raw.id : undefined,
@@ -1750,6 +1890,13 @@ export class Workbook {
         }
       }
       if (Array.isArray(raw?.nestedHeaders)) sheet.setNestedHeaders(raw.nestedHeaders);
+      sheet.freezeRows = Math.max(0, Math.min(sheet.rowCount, Number(raw?.freezeRows) || 0));
+      sheet.freezeColumns = Math.max(0, Math.min(sheet.columnCount, Number(raw?.freezeColumns) || 0));
+      for (const [column, criteria] of Array.isArray(raw?.filterCriteria) ? raw.filterCriteria : []) sheet.setFilterCriteria(column, criteria);
+      for (const [column, predicate] of Array.isArray(raw?.runtimeFilters) ? raw.runtimeFilters : []) {
+        if (typeof predicate === 'function') sheet.setFilter(column, predicate);
+      }
+      for (const spec of Array.isArray(raw?.pivots) ? raw.pivots : []) sheet.pivotSpecs.push(spec);
       for (const table of Array.isArray(raw?.tables) ? raw.tables : []) {
         if (table && typeof table.name === 'string' && typeof table.range === 'string') {
           try {
@@ -1767,6 +1914,7 @@ export class Workbook {
       for (const rule of Array.isArray(raw?.validations) ? raw.validations : []) {
         if (rule && typeof rule.range === 'string' && typeof rule.type === 'string') {
           sheet.addValidation({
+            ...rule,
             range: rule.range,
             type: rule.type,
             action: rule.action ?? 'mark',
@@ -1775,12 +1923,14 @@ export class Workbook {
             values: rule.values,
             length: rule.length,
             message: rule.message,
+            predicate: typeof rule.predicate === 'function' ? rule.predicate : undefined,
           });
         }
       }
       for (const rule of Array.isArray(raw?.conditionalFormats) ? raw.conditionalFormats : []) {
         if (rule && typeof rule.range === 'string' && typeof rule.type === 'string') {
           sheet.conditionalFormats.add({
+            ...rule,
             range: rule.range,
             type: rule.type,
             operator: rule.operator,
@@ -1790,6 +1940,7 @@ export class Workbook {
             style: rule.style ?? {},
             priority: rule.priority ?? 0,
             stopIfTrue: rule.stopIfTrue,
+            predicate: typeof rule.predicate === 'function' ? rule.predicate : undefined,
           });
         }
       }
@@ -1816,8 +1967,20 @@ export class Workbook {
     // Loading replays recorded mutations (merges); a fresh document starts
     // with an empty history so its first undo is the first user edit.
     workbook.history.clear();
+    if (typeof snapshot.activeWorksheetId === 'string' && workbook.getWorksheet(snapshot.activeWorksheetId)) {
+      workbook.activeSheetId = snapshot.activeWorksheetId;
+    }
     return workbook;
   }
+}
+
+/** Apply serialized map entries to a worksheet map (F13 loader helper). */
+function cloneSnapshot<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((entry) => cloneSnapshot(entry)) as T;
+  if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, cloneSnapshot(entry)])) as T;
+  }
+  return value;
 }
 
 /** Apply serialized map entries to a worksheet map (F13 loader helper). */

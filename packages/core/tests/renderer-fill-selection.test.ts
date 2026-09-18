@@ -47,7 +47,7 @@ describe('fill drag and selection paint', () => {
     expect(sheet.getStyle(1, 1)).toMatchObject({ bold: true, background: '#ffff00' });
     expect(renderer.getCellElement(0, 1)?.textContent).toBe('12');
     expect(renderer.getCellElement(2, 2)?.textContent).toBe('99');
-    expect(host.querySelectorAll('[aria-selected="true"]')).toHaveLength(9);
+    expect(host.querySelectorAll('[role="gridcell"][aria-selected="true"]')).toHaveLength(9);
   });
 
   it.each([[0, 0], [0, 4], [4, 0], [4, 4]])('ordinary diagonal dragging to (%i, %i) only changes selection', (row, column) => {
@@ -164,7 +164,7 @@ describe('fill drag and selection paint', () => {
     }
     mouse(renderer.getCellElement(5, 3)!, 'mousedown');
     expect(cells.map((cell) => cell.style.background)).toEqual(original);
-    expect(host.querySelectorAll('[aria-selected="true"]')).toHaveLength(1);
+    expect(host.querySelectorAll('[role="gridcell"][aria-selected="true"]')).toHaveLength(1);
   });
 
   it('updates tint and accessibility state when selection changes through the keyboard or API', () => {

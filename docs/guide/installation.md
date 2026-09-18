@@ -26,7 +26,7 @@ pnpm add @ezygrid/core @ezygrid/theme-default
 ```
 
 ::: warning
-Packages are at version 0.1.0 and not yet published to npm. Until then, depend on the workspace directly.
+Packages are at version 0.1.1 and not yet published to npm. Until then, depend on the workspace directly.
 :::
 
 ## Core packages

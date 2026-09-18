@@ -2,8 +2,10 @@
 
 Ezygrid is a framework-agnostic spreadsheet engine and UI. This page walks through every way to bootstrap a grid; the rest of the guide explores each feature in depth.
 
+All integrations open the [full editor](/guide/editor) by default. Its styles load automatically; use `renderer: { mode: 'grid' }` for a compact embed.
+
 ::: tip Status
-Ezygrid is in early development (v0.1.0). APIs are stabilizing and packages are currently distributed from source within the repository.
+Ezygrid is in early development (v0.1.1). APIs are stabilizing and packages are currently distributed from source within the repository.
 :::
 
 ## Vanilla JS/TS

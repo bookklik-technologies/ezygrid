@@ -6,16 +6,16 @@
   <title>Ezygrid - Advanced sheet</title>
 </head>
 <body>
-  <div id="editor" style="height: 520px"></div>
-  <p><button type="button" id="download">Download CSV</button></p>
+  <div id="app" style="height: 640px"></div>
+
 
   <script src="../packages/core/dist/browser/ezygrid.js"></script>
   <script>
     // Built-in toolbar and formula bar, validation, conditional formats and CSV export.
     Ezygrid.ready.then(() => {
       const editor = new Ezygrid({
-        target: '#editor',
-        renderer: { toolbar: true, formulaBar: true },
+        target: '#app',
+        filename: 'Inventory',
         worksheets: [
           { name: 'Inventory', data: [
             ['SKU', 'Item', 'Qty', 'Price', 'Status'],
@@ -33,13 +33,6 @@
       sheet.addTable({ name: 'InventoryTable', range: 'A1:E4' });
       editor.renderer.render();
 
-      document.querySelector('#download').addEventListener('click', () => {
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(new Blob([sheet.toCsv({ escapeFormulas: true })], { type: 'text/csv;charset=utf-8' }));
-        link.download = 'inventory.csv';
-        link.click();
-        setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-      });
 
       window.editor = editor;
     }).catch(console.error);

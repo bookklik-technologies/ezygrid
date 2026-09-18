@@ -108,7 +108,7 @@ describe('GridRenderer Phase 2 completion', () => {
       worksheets: [{ rows: 100, columns: 10, data: [['x']] }],
       toolbar: true,
     });
-    const renderer = new GridRenderer(container, wb, { toolbar: true });
+    const renderer = new GridRenderer(container, wb, { mode: 'grid', toolbar: true });
     const boldButton = [...renderer['root'].querySelectorAll('.ezygrid-toolbar-button')].find(
       (b) => b.textContent === 'Bold',
     ) as HTMLButtonElement;

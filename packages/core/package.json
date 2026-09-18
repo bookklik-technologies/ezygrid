@@ -1,6 +1,6 @@
 {
   "name": "@ezygrid/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Workbook/worksheet facade, rendering, selection, editing, and history engine for Ezygrid.",
   "license": "MIT",
   "author": {
@@ -26,6 +26,14 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./xlsx/*": {
+      "types": "./dist/xlsx/*.d.ts",
+      "import": "./dist/xlsx/*.js"
+    },
+    "./xlsx": {
+      "types": "./dist/xlsx/index.d.ts",
+      "import": "./dist/xlsx/index.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"

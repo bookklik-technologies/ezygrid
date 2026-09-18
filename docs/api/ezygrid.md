@@ -2,6 +2,8 @@
 
 The top-level entry: `new Ezygrid(options)` wires a workbook model to a rendered grid inside a host element.
 
+The [full editor](/guide/editor) is enabled by default, including its styles and Excel file support. Use `renderer: { mode: 'grid' }` for the compact grid.
+
 ## Constructor
 
 ```ts

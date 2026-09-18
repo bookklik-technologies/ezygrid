@@ -78,7 +78,9 @@ export class Ezygrid {
     hosts.push(...root.querySelectorAll(marker));
     return hosts.map((host) => {
       const target = resolveTarget(host as HTMLElement);
-      return instances.get(target) ?? new Ezygrid({ target });
+      return instances.get(target) ?? new Ezygrid({ target, renderer: {
+        mode: target.getAttribute('data-ezg-mode') === 'grid' ? 'grid' : 'editor',
+      } });
     });
   }
 

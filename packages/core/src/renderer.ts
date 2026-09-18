@@ -12,8 +12,15 @@ import { formulaRegistry, type FunctionMeta } from '@ezygrid/formula';
 import { parseRange, rectContains, toA1, type Rect } from '@ezygrid/model';
 import type { CellStyle } from './workbook.js';
 import { DEFAULT_COLUMN_WIDTH, DEFAULT_ROW_HEIGHT } from './workbook.js';
+import { EditorShell } from './ui/editor-shell.js';
+import { applyStyle } from './ui/cell-style.js';
+import type { SelectionState } from './selection.js';
 
 export interface GridRendererOptions {
+  mode?: 'editor' | 'grid';
+  topbar?: boolean;
+  sheetTabs?: boolean;
+  statusBar?: boolean;
   /** Extra rows/columns rendered beyond the viewport edges. */
   overscanRows?: number;
   overscanColumns?: number;
@@ -86,6 +93,9 @@ export class GridRenderer {
   private scrollRow = 0;
   private scrollCol = 0;
   private destroyed = false;
+  private shell?: EditorShell;
+  private resizeObserver?: ResizeObserver;
+  private sheetViews = new Map<string, { selection: SelectionState; left: number; top: number }>();
 
   constructor(container: HTMLElement, workbook: Workbook, options: GridRendererOptions = {}) {
     this.container = container;
@@ -93,12 +103,16 @@ export class GridRenderer {
     this.worksheet = workbook.activeWorksheet;
     this.domId = `ezygrid-${Math.random().toString(36).slice(2, 10)}`;
     this.options = {
+      mode: options.mode ?? 'editor',
+      topbar: options.topbar ?? true,
+      sheetTabs: options.sheetTabs ?? true,
+      statusBar: options.statusBar ?? true,
       overscanRows: options.overscanRows ?? 5,
       overscanColumns: options.overscanColumns ?? 2,
       headerHeight: options.headerHeight ?? 24,
       headerWidth: options.headerWidth ?? 48,
       formulaBar: options.formulaBar ?? true,
-      toolbar: options.toolbar ?? false,
+      toolbar: options.toolbar ?? options.mode !== 'grid',
       contextMenu: options.contextMenu ?? true,
       direction: options.direction ?? 'ltr',
     };
@@ -108,6 +122,12 @@ export class GridRenderer {
       this.registerDefaultCommands();
       this.build();
       this.bind();
+      if (this.options.mode === 'editor') this.shell = new EditorShell(this.container, this.root, workbook, this, this.options);
+      const Observer = this.container.ownerDocument.defaultView?.ResizeObserver;
+      if (Observer) {
+        this.resizeObserver = new Observer(() => this.render());
+        this.resizeObserver.observe(this.root);
+      }
       this.render();
       // Model changes drive rendering: edits, structural operations and
       // undo/redo replay refresh the visible projection automatically.
@@ -115,12 +135,26 @@ export class GridRenderer {
       // depend on the edited sheet (F20).
       this.unlistenOperations = workbook.onOperation((operation) => {
         if (this.destroyed) return;
+        this.syncWorksheet();
+        if (operation.type.startsWith('worksheet.') || operation.type === 'document.load') {
+          this.render();
+          return;
+        }
         switch (operation.type) {
           case 'cell.set':
           case 'meta.set':
           case 'merges.set':
-          case 'workbook.update':
             break;
+          case 'workbook.update': {
+            const operations = (operation.payload as { operations?: import('@ezygrid/model').Operation[] }).operations ?? [];
+            for (const change of operations) {
+              if (change.worksheetId !== this.worksheet.id || !/^(rows|columns)\.(insert|delete)$/.test(change.type)) continue;
+              const { index, count } = change.payload as { index: number; count: number };
+              this.selection.transformAxis(change.type.startsWith('rows') ? 'row' : 'column', index, change.type.endsWith('insert') ? count : -count);
+            }
+            this.selection.resize(this.worksheet.rowCount, this.worksheet.columnCount);
+            break;
+          }
           case 'rows.insert':
           case 'rows.delete':
           case 'columns.insert':
@@ -164,7 +198,7 @@ export class GridRenderer {
   private get topInset(): number {
     return (
       (this.options.formulaBar ? 24 : 0) +
-      (this.options.toolbar ? 32 : 0)
+      (this.options.toolbar && this.options.mode === 'grid' ? 32 : 0)
     );
   }
 
@@ -255,7 +289,7 @@ export class GridRenderer {
     this.root.style.overflow = 'hidden';
     this.root.style.userSelect = 'none';
     this.root.style.boxSizing = 'border-box';
-    this.root.style.fontFamily = 'var(--ezygrid-font-family, system-ui, sans-serif)';
+    this.root.style.fontFamily = 'var(--ezygrid-font-family, Outfit, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif)';
     this.root.style.fontSize = 'var(--ezygrid-font-size, 13px)';
     this.root.style.background = 'var(--ezygrid-bg, #ffffff)';
     this.root.style.color = 'var(--ezygrid-text, #0f172a)';
@@ -412,16 +446,16 @@ export class GridRenderer {
       pointerEvents: 'none',
     } as CSSStyleDeclaration);
 
-    if (this.options.formulaBar) {
+    if (this.options.formulaBar || this.options.mode === 'editor') {
       const bar = doc.createElement('div');
       bar.className = 'ezygrid-formulabar';
       Object.assign(bar.style, {
         position: 'absolute',
-        top: `${this.options.toolbar ? 32 : 0}px`,
+        top: `${this.options.toolbar && this.options.mode === 'grid' ? 32 : 0}px`,
         left: '0',
         right: '0',
         height: '24px',
-        display: 'flex',
+        display: this.options.formulaBar ? 'flex' : 'none',
         alignItems: 'stretch',
         boxSizing: 'border-box',
       } as CSSStyleDeclaration);
@@ -474,10 +508,10 @@ export class GridRenderer {
       });
       bar.append(this.nameBox, this.formulaInput);
       this.formulaBarEl = bar;
-      this.root.appendChild(bar);
+      if (this.options.formulaBar) this.root.appendChild(bar);
     }
 
-    if (this.options.toolbar) {
+    if (this.options.toolbar && this.options.mode === 'grid') {
       const toolbar = doc.createElement('div');
       toolbar.className = 'ezygrid-toolbar';
       Object.assign(toolbar.style, {
@@ -528,7 +562,7 @@ export class GridRenderer {
         minWidth: '160px',
         zIndex: '1000',
       } as CSSStyleDeclaration);
-      this.container.appendChild(this.contextMenuEl);
+      this.root.appendChild(this.contextMenuEl);
       this.cellLayer.addEventListener('contextmenu', this.onContextMenu);
       doc.addEventListener('mousedown', this.onGlobalMouseDown);
     }
@@ -552,6 +586,7 @@ export class GridRenderer {
       }
       if (this.fillDragging) this.cancelFillDrag();
       this.renderSelection();
+      this.shell?.update();
     });
     this.container.addEventListener('focusin', this.onFocusIn);
     this.container.addEventListener('focusout', this.onFocusOut);
@@ -668,20 +703,15 @@ export class GridRenderer {
     const doc = this.container.ownerDocument;
     menu.textContent = '';
     const items: { label: string; run: () => void }[] = [
-      { label: 'Cut', run: () => this.copySelection(true) },
-      { label: 'Copy', run: () => this.copySelection(false) },
-      { label: 'Paste', run: () => { void this.pasteSelection(); } },
+      { label: 'Cut', run: () => this.commands.execute('clipboard.cut', this.commandContext()) },
+      { label: 'Copy', run: () => this.commands.execute('clipboard.copy', this.commandContext()) },
+      { label: 'Paste', run: () => this.commands.execute('clipboard.paste', this.commandContext()) },
       { label: 'Edit cell', run: () => this.beginEditAt() },
       { label: 'Fill down', run: () => this.commands.execute('cells.fillDown', this.commandContext()) },
       {
         label: 'Clear contents',
         run: () => {
-          const primary = this.selection.primary;
-          for (let r = primary.top; r <= primary.bottom; r++) {
-            for (let c = primary.left; c <= primary.right; c++) {
-              this.worksheet.setValue(r, c, null);
-            }
-          }
+          this.clearSelectedContents();
         },
       },
       {
@@ -689,17 +719,30 @@ export class GridRenderer {
         run: () => this.commands.execute('format.clear', this.commandContext()),
       },
     ];
+    menu.setAttribute('role', 'menu');
     for (const item of items) {
       const el = doc.createElement('div');
       el.className = 'ezygrid-contextmenu-item';
       el.textContent = item.label;
+      el.setAttribute('role', 'menuitem');
+      el.tabIndex = 0;
+      el.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); el.click(); }
+        else if (event.key === 'Escape') { event.preventDefault(); menu.style.display = 'none'; this.focus(); }
+        else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          const next = event.key === 'ArrowDown' ? el.nextElementSibling ?? menu.firstElementChild : el.previousElementSibling ?? menu.lastElementChild;
+          (next as HTMLElement)?.focus();
+        }
+        event.stopPropagation();
+      });
       Object.assign(el.style, {
         padding: '6px 12px',
         cursor: 'pointer',
       } as CSSStyleDeclaration);
       el.addEventListener('click', () => {
         this.root.focus({ preventScroll: true });
-        item.run();
+        try { item.run(); } catch (error) { this.shell?.message(error); }
         menu.style.display = 'none';
         this.render();
       });
@@ -713,6 +756,9 @@ export class GridRenderer {
       border: '1px solid var(--ezygrid-gridline, #e2e8f0)',
       boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
     } as CSSStyleDeclaration);
+    const bounds = menu.getBoundingClientRect();
+    menu.style.left = `${Math.max(0, Math.min(clientX, (doc.defaultView?.innerWidth ?? clientX + bounds.width) - bounds.width))}px`;
+    menu.style.top = `${Math.max(0, Math.min(clientY, (doc.defaultView?.innerHeight ?? clientY + bounds.height) - bounds.height))}px`;
   }
 
   private onFillDragEnd = (event: MouseEvent): void => {
@@ -793,6 +839,7 @@ export class GridRenderer {
   };
 
   private onKeyDown = (event: KeyboardEvent): void => {
+    if ((event.target as HTMLElement).closest('input,select,textarea,[contenteditable="true"]')) return;
     if (this.fillDragging) {
       event.preventDefault();
       return;
@@ -1182,6 +1229,9 @@ export class GridRenderer {
 
   private commitEditor(): void {
     if (!this.editorInput || !this.editing.editing) return;
+    const session = this.editing.session!;
+    const result = this.worksheet.validations.check(this.worksheet, session.row, session.column, parseEditorValue(this.editorInput.value));
+    if (result.message) this.shell?.message(result.message);
     this.editing.commit(this.worksheet, this.editorInput.value);
     this.unmountEditor();
     this.render();
@@ -1251,6 +1301,12 @@ export class GridRenderer {
       userSelect: 'text',
     } as CSSStyleDeclaration);
     this.positionEditor(input, row, column);
+    const cellStyle = this.worksheet.getStyle(row, column);
+    input.style.fontFamily = cellStyle?.fontFamily ?? 'inherit';
+    input.style.fontSize = cellStyle?.fontSize ? `${cellStyle.fontSize * this.zoom}px` : '';
+    input.style.fontWeight = cellStyle?.bold ? 'bold' : '';
+    input.style.fontStyle = cellStyle?.italic ? 'italic' : '';
+    input.style.textAlign = cellStyle?.align ?? '';
     input.addEventListener('keydown', ((e: KeyboardEvent) => {
       if (e.key === 'F4') {
         e.preventDefault();
@@ -1412,8 +1468,18 @@ export class GridRenderer {
 
   navigateToAddress(address: string): void {
     try {
+      const definition = this.workbook.definedNames.get(address);
+      if (definition?.type === 'range') address = definition.ref;
+      const bang = address.lastIndexOf('!');
+      if (bang >= 0) {
+        const name = address.slice(0, bang).replace(/^'|'$/g, '').replace(/''/g, "'");
+        const sheet = this.workbook.getWorksheet(name);
+        if (sheet) this.workbook.setActiveWorksheet(sheet.id);
+        address = address.slice(bang + 1);
+      }
       const rect = parseRange(address);
       this.selection.setActive(rect.top, rect.left);
+      this.selection.extendTo(rect.bottom, rect.right);
       this.ensureActiveVisible();
       this.render();
       this.updateFormulaBar();
@@ -1424,6 +1490,56 @@ export class GridRenderer {
 
   refresh(): void {
     this.render();
+  }
+
+  /** Commit drafts before an editor command changes sheet or selection. */
+  commitEdits(): void {
+    this.commitEditor();
+    this.commitFormulaBarEdit();
+  }
+
+  focus(): void { this.root.focus({ preventScroll: true }); }
+
+  insertFormula(formula: string): void {
+    this.beginEditAt(formula);
+  }
+
+  setFormulaBarVisible(visible: boolean): void {
+    const previous = this.topInset;
+    this.options.formulaBar = visible;
+    if (this.formulaBarEl) {
+      if (visible) { this.root.append(this.formulaBarEl); this.formulaBarEl.style.display = 'flex'; }
+      else this.formulaBarEl.remove();
+    }
+    const delta = this.topInset - previous;
+    for (const element of [this.scrollEl, this.colHeaderEl, this.rowHeaderEl, this.cornerEl, this.frozenTopEl, this.frozenLeftEl]) {
+      element.style.top = `${(parseFloat(element.style.top) || 0) + delta}px`;
+    }
+    this.render();
+  }
+
+  private syncWorksheet(): void {
+    const next = this.workbook.activeWorksheet;
+    if (next === this.worksheet) return;
+    this.formulaBarEdit = null;
+    this.editing.cancel();
+    this.unmountEditor();
+    this.sheetViews.set(this.worksheet.id, {
+      selection: structuredClone(this.selection.state), left: this.scrollLeft(), top: this.scrollTop(),
+    });
+    this.worksheet = next;
+    const saved = this.sheetViews.get(next.id);
+    this.selection.state = saved?.selection ?? {
+      active: { row: 0, column: 0 }, anchor: { row: 0, column: 0 }, ranges: [{ top: 0, left: 0, bottom: 0, right: 0 }],
+    };
+    this.selection.resize(next.rowCount, next.columnCount);
+    this.scrollEl.scrollLeft = saved?.left ?? 0;
+    this.scrollEl.scrollTop = saved?.top ?? 0;
+    this.contextMenuEl?.style.setProperty('display', 'none');
+    if (this.disposePlugins) {
+      this.disposePlugins();
+      this.disposePlugins = this.workbook.pluginManager.attach({ workbook: this.workbook, worksheet: next, commands: this.commands, renderer: this });
+    }
   }
 
   private acquireCell(): HTMLElement {
@@ -1513,6 +1629,7 @@ export class GridRenderer {
     const style = this.worksheet.getStyle(row, column);
     const conditional = this.worksheet.conditionalFormats.evaluate(this.worksheet, row, column);
     const merged: CellStyle = { ...style, ...conditional };
+    applyStyle(cell, merged, this.zoom);
     cell.style.fontWeight = merged.bold ? 'bold' : '';
     cell.style.fontStyle = merged.italic ? 'italic' : '';
     cell.style.textDecoration = merged.underline ? 'underline' : '';
@@ -1892,6 +2009,7 @@ export class GridRenderer {
     this.renderFrozen();
     this.renderSelection(false);
     this.renderMedia();
+    this.shell?.update();
   }
 
   /** Floating charts, images and shapes (§30/§31/§32). */
@@ -1973,6 +2091,8 @@ export class GridRenderer {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.resizeObserver?.disconnect();
+    this.shell?.destroy();
     this.formulaBarEdit = null;
     this.cancelFillDrag();
     // Plugin attachments (timers, listeners, observers) go first so plugin

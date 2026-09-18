@@ -12,7 +12,7 @@ export interface ThemeTokens {
 }
 
 export const defaultThemeTokens: ThemeTokens = {
-  fontFamily: 'system-ui, sans-serif',
+  fontFamily: 'Outfit, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif',
   fontSize: '13px',
   bg: '#ffffff',
   text: '#0f172a',
@@ -46,7 +46,7 @@ export function buildThemeCss(overrides: Partial<ThemeTokens> = {}): string {
   const lines = Object.entries(VARIABLE_MAP)
     .map(([key, variable]) => `  ${variable}: ${tokens[key as keyof ThemeTokens]};`)
     .join('\n');
-  return `.ezygrid {\n${lines}\n}`;
+  return `.ezygrid, .ezygrid-suite {\n${lines}\n}`;
 }
 
 export const darkThemeTokens: Partial<ThemeTokens> = {

@@ -11,6 +11,8 @@ Each example is a single self-contained HTML file loading the local browser
 loader from `packages/core/dist/browser/`. The library CSS/theme is applied by
 the editor itself; the only inline styles are host sizing.
 
+Every example opens the full editor with its ribbon and file controls. For a compact embed use `renderer: { mode: 'grid' }`, or `data-ezg-mode="grid"` on a declarative host.
+
 | Example | File | Shows |
 | --- | --- | --- |
 | Declarative embed | [declarative.html](declarative.html) | Zero-JS startup via `data-ezg-editor` |

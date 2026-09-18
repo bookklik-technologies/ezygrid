@@ -1,6 +1,6 @@
 {
   "name": "@ezygrid/angular",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Angular wrapper for Ezygrid.",
   "license": "MIT",
   "author": {

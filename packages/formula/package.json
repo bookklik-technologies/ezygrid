@@ -1,6 +1,6 @@
 {
   "name": "@ezygrid/formula",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Excel-compatible formula lexer/parser, dependency graph, and function library for Ezygrid.",
   "license": "MIT",
   "author": {

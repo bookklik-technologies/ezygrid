@@ -35,7 +35,7 @@ export class ValidationService {
   private rules: ValidationRule[] = [];
 
   add(rule: Omit<ValidationRule, 'id'>): ValidationRule {
-    const full: ValidationRule = { ...rule, id: createId('val') };
+    const full: ValidationRule = { ...rule, id: (rule as Partial<ValidationRule>).id ?? createId('val') };
     this.rules.push(full);
     return full;
   }

@@ -12,6 +12,7 @@ export interface Command {
   title: string;
   shortcut?: string;
   isEnabled?(ctx: CommandContext): boolean;
+  isSelected?(ctx: CommandContext): boolean;
   execute(ctx: CommandContext): void;
 }
 

@@ -38,7 +38,7 @@ export class ConditionalFormatEngine {
   private rules: ConditionalFormatRule[] = [];
 
   add(rule: Omit<ConditionalFormatRule, 'id'>): ConditionalFormatRule {
-    const full: ConditionalFormatRule = { ...rule, id: createId('cf') };
+    const full: ConditionalFormatRule = { ...rule, id: (rule as Partial<ConditionalFormatRule>).id ?? createId('cf') };
     this.rules.push(full);
     return full;
   }

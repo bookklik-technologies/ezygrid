@@ -60,7 +60,7 @@ export class ChartEngine {
     const full: ChartSpec = {
       ...spec,
       colors: colors && colors.length > 0 ? colors : undefined,
-      id: createId('chart'),
+      id: (spec as Partial<ChartSpec>).id ?? createId('chart'),
     };
     this.charts.push(full);
     return full;

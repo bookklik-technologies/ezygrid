@@ -1,7 +1,8 @@
 /* @ezygrid/theme-dark — import after the default theme (or standalone).
    Pair with `color-scheme: dark` on the host page. */
-.ezygrid {
-  --ezygrid-font-family: system-ui, sans-serif;
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap");
+.ezygrid, .ezygrid-suite {
+  --ezygrid-font-family: Outfit, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
   --ezygrid-font-size: 13px;
   --ezygrid-bg: #0f172a;
   --ezygrid-text: #e2e8f0;

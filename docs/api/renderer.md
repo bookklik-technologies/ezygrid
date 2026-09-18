@@ -15,12 +15,16 @@ const renderer = new GridRenderer(container, workbook, {
 
 ```ts
 interface GridRendererOptions {
+  mode?: 'editor' | 'grid';   // default editor
+  topbar?: boolean;          // default true in editor mode
+  sheetTabs?: boolean;       // default true in editor mode
+  statusBar?: boolean;       // default true in editor mode
   overscanRows?: number;      // default 5
   overscanColumns?: number;   // default 2
   headerHeight?: number;      // default 24
   headerWidth?: number;       // default 48
   formulaBar?: boolean;       // default true (name box + formula input)
-  toolbar?: boolean;          // default false (undo/redo/B/I/U/copy/cut/paste/fill-down)
+  toolbar?: boolean;          // editor: ribbon, default true; grid: basic toolbar, default false
   contextMenu?: boolean;      // default true
   direction?: 'ltr' | 'rtl';
 }
@@ -43,6 +47,10 @@ destroy(): void;
 ```ts
 scrollTo(row: number, column: number): void;
 navigateToAddress(address: string): void;   // name-box style navigation
+setFormulaBarVisible(visible: boolean): void;
+commitEdits(): void;
+focus(): void;
+insertFormula(formula: string): void;
 setZoom(zoom: number): void;
 getZoom(): number;
 

@@ -1,5 +1,7 @@
 # Styling & number formats
 
+Apply cell formatting through the Home ribbon or the worksheet API. Formatting is stored with the workbook and used by rendering, printing, and supported Excel exports.
+
 ## Cell styles
 
 Styles are applied to ranges using A1 notation and are undoable (`meta.set` operations):
@@ -17,6 +19,15 @@ sheet.clearStyle('A1:D1');
 
 ```ts
 interface CellStyle {
+  fontFamily?: string;
+  fontSize?: number; // pixels
+  wrap?: boolean;
+  verticalAlign?: 'top' | 'middle' | 'bottom';
+  borders?: Partial<Record<'top' | 'right' | 'bottom' | 'left', {
+    color: string;
+    width: number;
+    style: 'solid' | 'dashed' | 'dotted';
+  } | null>>;
   bold?: boolean;
   italic?: boolean;
   underline?: boolean;

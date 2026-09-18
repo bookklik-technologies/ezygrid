@@ -65,7 +65,7 @@ export class EzyGridComponent implements AfterViewInit, OnChanges, OnDestroy {
 
   private rebuild(): void {
     const container = this.host?.nativeElement;
-    if (!container || !this.config) return;
+    if (!container) return;
     this.rendererInstance?.destroy();
     this.workbookInstance = createGrid(container, this.config);
     this.rendererInstance = new GridRenderer(container, this.workbookInstance, this.options);
