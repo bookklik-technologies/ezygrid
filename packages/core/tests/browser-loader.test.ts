@@ -177,7 +177,16 @@ describe('generated browser distribution', () => {
   it('loads the real separate files and renders both initialization styles', async () => {
     const h = harness();
     document.body.innerHTML = '<div id="auto" data-ezg-editor></div><div id="manual"></div>';
-    const globals = { window, document, URL, HTMLElement, navigator: window.navigator, crypto: window.crypto };
+    const globals = {
+      window,
+      document,
+      URL,
+      HTMLElement,
+      navigator: window.navigator,
+      crypto: window.crypto,
+      TextEncoder: window.TextEncoder ?? globalThis.TextEncoder,
+      TextDecoder: window.TextDecoder ?? globalThis.TextDecoder,
+    };
     const loader = readFileSync(path.join(output, 'ezygrid.js'), 'utf8');
     const manifest = JSON.parse(readFileSync(path.join(output, 'manifest.json'), 'utf8')) as BrowserManifest;
     runInNewContext(loader, globals);
