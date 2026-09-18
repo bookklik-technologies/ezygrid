@@ -8,6 +8,12 @@ import { workbookFromXlsx, workbookToXlsx } from '../xlsx/index.js';
 import { buildPrintHtml, printHtml } from '../print.js';
 import { darkThemeTokens, defaultThemeTokens } from '../theme.js';
 
+// Official Ezygrid brand mark — keep in sync with the repository's icon.svg
+// (viewBox normalized and gradient id namespaced so multiple editors on one
+// page never share an id).
+const brandLogo =
+  '<svg viewBox="0 0 455 455" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs><radialGradient cx="4314825" cy="0" r="6102084" gradientUnits="userSpaceOnUse" spreadMethod="pad" id="ezg-logo-fill" gradientTransform="matrix(0.000104987 0 0 0.000104987 794 2268)"><stop offset="0" stop-color="#00FF99"/><stop offset="0.2" stop-color="#00FF99"/><stop offset="1" stop-color="#2563EB"/></radialGradient></defs><g transform="translate(-793 -2267)"><rect x="794" y="2268" width="453" height="453" fill="url(#ezg-logo-fill)"/><path d="M1065.98 2343C1124.53 2343 1172 2390.47 1172 2449.02 1172 2500.26 1135.66 2543 1087.34 2552.89L1080.08 2554 1080.58 2550.74C1080.94 2547.17 1081.12 2543.56 1081.12 2539.9 1081.12 2481.34 1033.66 2433.88 975.101 2433.88 971.441 2433.88 967.825 2434.06 964.261 2434.42L961 2434.92 962.109 2427.66C971.995 2379.34 1014.74 2343 1065.98 2343Z" fill="#FFFFFF" fill-rule="evenodd"/><path d="M960.921 2435 960.424 2438.26C960.062 2441.82 959.876 2445.44 959.876 2449.1 959.876 2507.66 1007.34 2555.12 1065.9 2555.12 1069.56 2555.12 1073.17 2554.94 1076.74 2554.58L1080 2554.08 1078.89 2561.34C1069 2609.66 1026.26 2646 975.023 2646 916.468 2646 869 2598.53 869 2539.98 869 2488.74 905.343 2446 953.655 2436.11L960.921 2435Z" fill="#FFFFFF" fill-rule="evenodd"/></g></svg>';
+
 // Lucide icon names per command id (see dom.ts for the icon data).
 const commandIcons: Record<string, string> = {
   'file.new': 'newDoc',
@@ -108,7 +114,9 @@ export class EditorShell {
     const top = node(this.doc, 'div', 'ezg-topbar');
     top.hidden = !options.topbar;
     const brand = node(this.doc, 'div', 'ezg-brand');
-    brand.append(node(this.doc, 'span', 'ezg-mark', 'E'), node(this.doc, 'span', '', 'Ezygrid'));
+    const mark = node(this.doc, 'span', 'ezg-mark');
+    mark.innerHTML = brandLogo; // static, code-owned brand asset (mirrors icon.svg)
+    brand.append(mark, node(this.doc, 'span', '', 'Ezygrid'));
     this.filename = node(this.doc, 'input', 'ezg-title');
     this.filename.setAttribute('aria-label', 'Workbook filename');
     this.filename.addEventListener('change', () => this.mutate(() => { workbook.filename = this.filename.value.trim() || 'Untitled workbook'; }));

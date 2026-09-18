@@ -45,6 +45,17 @@ const css = buildThemeCss({ ...darkThemeTokens, selection: '#00ff99' });
 }
 ```
 
+## Suite UI standard
+
+The editor chrome shares the same visual standard as the other Ezy libraries:
+
+- Font: Outfit, weights 400–800, fallback stack `-apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif`
+- Icons: Lucide, 1.8 stroke with round caps/joins; 18px in icon buttons, 14px in menus
+- Radius scale: 6px controls, 10px menus, 14px dialogs
+- Icon buttons 32px, topbar 52px, focus ring 2px accent with 1px offset
+
+Brand accent colors (mint selection) remain Ezygrid-specific.
+
 ## Styling hooks
 
 The renderer emits stable class names for custom CSS:

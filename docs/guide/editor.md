@@ -67,7 +67,7 @@ const editor = new Ezygrid({
 });
 ```
 
-In editor mode, `toolbar` controls the ribbon controls. The ribbon tabs remain available so users can expand it again. Outfit is the default UI font, with system-font fallbacks. See [theming](/guide/theming) for scoped CSS variables.
+In editor mode, `toolbar` controls the ribbon controls. The ribbon tabs remain available so users can expand it again. The chrome follows the shared Ezy suite UI standard: Outfit (weights 400–800) with system-font fallbacks and Lucide icons at 1.8 stroke. See [theming](/guide/theming) for scoped CSS variables.
 
 ## Update documents programmatically
 
