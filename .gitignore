@@ -4,5 +4,6 @@ dist
 coverage
 .pnpm-store
 # VitePress
+docs/.vitepress/
 docs/.vitepress/dist/
 docs/.vitepress/cache/

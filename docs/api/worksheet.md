@@ -56,6 +56,9 @@ getEditorFor(row, column): EditorAssignment | undefined;
 ## Structure
 
 ```ts
+setRowHeight(index: number, height: number): void;
+setColumnWidth(index: number, width: number): void;
+
 insertRows(index: number, count?: number): void;   // default count 1
 deleteRows(index: number, count?: number): void;
 insertColumns(index: number, count?: number): void;
@@ -71,6 +74,10 @@ showColumns(index: number, count?: number): void;
 isRowHidden(row: number): boolean;
 isColumnHidden(column: number): boolean;
 ```
+
+Sizing methods use zero-based indexes and unscaled pixels. Sizes must be finite and non-negative; invalid sizes or indexes throw `RangeError`. Each changed size emits a reversible `rows.resize` or `columns.resize` operation with `{ index, size }` and refreshes mounted renderers. Unchanged sizes create no history entry. Sizes persist through workbook snapshots.
+
+See [Resizing rows and columns](../guide/structure.md#resizing-rows-and-columns) for header dragging and examples.
 
 ## Groups, filters, headers
 

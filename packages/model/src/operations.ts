@@ -41,6 +41,12 @@ export interface MetaSetPayload {
   cells: MetaCellSnapshot[];
 }
 
+/** Unscaled pixel size of one zero-based row or column. */
+export interface ResizePayload {
+  index: number;
+  size: number;
+}
+
 /** Forward: merge `added`, unmerge `removed`. Inverse swaps both (F08). */
 export interface MergesSetPayload {
   added?: { top: number; left: number; bottom: number; right: number }[];
@@ -56,9 +62,11 @@ export type OperationType =
   | 'rows.insert'
   | 'rows.delete'
   | 'rows.move'
+  | 'rows.resize'
   | 'columns.insert'
   | 'columns.delete'
   | 'columns.move'
+  | 'columns.resize'
   | 'worksheet.add'
   | 'worksheet.remove'
   | 'worksheet.rename';

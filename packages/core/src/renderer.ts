@@ -53,6 +53,22 @@ const HANDLED_NAV_KEYS = new Set([
   'Backspace',
 ]);
 
+type ResizeAxis = 'row' | 'column';
+
+interface HeaderResize {
+  worksheet: Worksheet;
+  axis: ResizeAxis;
+  index: number;
+  originalSize: number;
+  size: number;
+  start: number;
+  zoom: number;
+  pointerId: number;
+  capture: HTMLElement;
+  cursor: string;
+  userSelect: string;
+}
+
 /**
  * DOM viewport renderer (Phase 0 prototype).
  *
@@ -95,6 +111,7 @@ export class GridRenderer {
   private destroyed = false;
   private shell?: EditorShell;
   private resizeObserver?: ResizeObserver;
+  private headerResize: HeaderResize | null = null;
   private sheetViews = new Map<string, { selection: SelectionState; left: number; top: number }>();
 
   constructor(container: HTMLElement, workbook: Workbook, options: GridRendererOptions = {}) {
@@ -135,6 +152,8 @@ export class GridRenderer {
       // depend on the edited sheet (F20).
       this.unlistenOperations = workbook.onOperation((operation) => {
         if (this.destroyed) return;
+        const resizing = this.headerResize !== null;
+        this.clearHeaderResize();
         this.syncWorksheet();
         if (operation.type.startsWith('worksheet.') || operation.type === 'document.load') {
           this.render();
@@ -144,6 +163,8 @@ export class GridRenderer {
           case 'cell.set':
           case 'meta.set':
           case 'merges.set':
+          case 'rows.resize':
+          case 'columns.resize':
             break;
           case 'workbook.update': {
             const operations = (operation.payload as { operations?: import('@ezygrid/model').Operation[] }).operations ?? [];
@@ -176,6 +197,7 @@ export class GridRenderer {
             this.selection.resize(this.worksheet.rowCount, this.worksheet.columnCount);
             break;
           default:
+            if (resizing) this.render();
             return;
         }
         this.render();
@@ -240,6 +262,7 @@ export class GridRenderer {
 
   setZoom(zoom: number): void {
     if (!Number.isFinite(zoom) || zoom <= 0) return;
+    this.clearHeaderResize();
     this.zoom = zoom;
     for (const [, el] of this.activeCells) {
       el.remove();
@@ -253,29 +276,57 @@ export class GridRenderer {
     return this.zoom;
   }
 
-  // Zoom-aware coordinate helpers.
+  // Preview geometry is local to this renderer; worksheet sizes stay committed.
+  private axisOffset(axis: ResizeAxis, index: number): number {
+    const sizes = axis === 'row' ? this.worksheet.rowSizes : this.worksheet.columnSizes;
+    const drag = this.headerResize;
+    const delta = drag?.axis === axis && index > drag.index ? drag.size - drag.originalSize : 0;
+    return sizes.prefixSum(index) + delta;
+  }
+
+  private axisSize(axis: ResizeAxis, index: number): number {
+    const drag = this.headerResize;
+    if (drag?.axis === axis && drag.index === index) return drag.size;
+    return (axis === 'row' ? this.worksheet.rowSizes : this.worksheet.columnSizes).sizeOf(index);
+  }
+
+  private axisIndex(axis: ResizeAxis, pixel: number): number {
+    const sizes = axis === 'row' ? this.worksheet.rowSizes : this.worksheet.columnSizes;
+    if (this.headerResize?.axis !== axis) return sizes.indexAt(pixel);
+    const count = axis === 'row' ? this.worksheet.rowCount : this.worksheet.columnCount;
+    let low = 0;
+    let high = count;
+    while (low < high) {
+      const mid = Math.floor((low + high + 1) / 2);
+      if (this.axisOffset(axis, mid) <= pixel) low = mid;
+      else high = mid - 1;
+    }
+    return Math.max(0, Math.min(count - 1, low));
+  }
+
+  // Zoom-aware coordinate helpers, including the end boundary of an axis.
   private zOffsetX(column: number): number {
-    return this.worksheet.columnSizes.offsetOf(column) * this.zoom;
+    return this.axisOffset('column', column) * this.zoom;
   }
 
   private zOffsetY(row: number): number {
-    return this.worksheet.rowSizes.offsetOf(row) * this.zoom;
+    return this.axisOffset('row', row) * this.zoom;
   }
 
   private zSizeX(column: number): number {
-    return this.worksheet.columnSizes.sizeOf(column) * this.zoom;
+    return this.axisSize('column', column) * this.zoom;
   }
 
   private zSizeY(row: number): number {
-    return this.worksheet.rowSizes.sizeOf(row) * this.zoom;
+    return this.axisSize('row', row) * this.zoom;
   }
 
   private zIndexRow(pixel: number): number {
-    return this.worksheet.rowSizes.indexAt(pixel / this.zoom);
+    return this.axisIndex('row', pixel / this.zoom);
   }
 
   private zIndexColumn(pixel: number): number {
-    return this.worksheet.columnSizes.indexAt(pixel / this.zoom);
+    return this.axisIndex('column', pixel / this.zoom);
   }
 
   private build(): void {
@@ -591,6 +642,8 @@ export class GridRenderer {
     this.container.addEventListener('focusin', this.onFocusIn);
     this.container.addEventListener('focusout', this.onFocusOut);
     this.scrollEl.addEventListener('scroll', this.onScroll);
+    this.colHeaderEl.addEventListener('pointerdown', this.onHeaderResizeStart);
+    this.rowHeaderEl.addEventListener('pointerdown', this.onHeaderResizeStart);
     this.cellLayer.addEventListener('mousedown', this.onMouseDown);
     this.cellLayer.addEventListener('dblclick', this.onDoubleClick);
     this.root.addEventListener('keydown', this.onKeyDown);
@@ -600,6 +653,100 @@ export class GridRenderer {
     if (this.fillHandle) {
       this.fillHandle.addEventListener('mousedown', this.onFillHandleDown);
     }
+  }
+
+  private onHeaderResizeStart = (event: PointerEvent): void => {
+    if (event.button !== 0 || this.headerResize) return;
+    const handle = (event.target as HTMLElement).closest<HTMLElement>('[data-resize-axis]');
+    if (!handle) return;
+    const axis = handle.dataset.resizeAxis as ResizeAxis;
+    const index = Number(handle.dataset.resizeIndex);
+    event.preventDefault();
+    event.stopPropagation();
+    this.commitEdits();
+    this.cancelFillDrag();
+    this.root.focus({ preventScroll: true });
+    const capture = axis === 'row' ? this.rowHeaderEl : this.colHeaderEl;
+    const size = this.axisSize(axis, index);
+    this.headerResize = {
+      worksheet: this.worksheet, axis, index, originalSize: size, size,
+      start: axis === 'row' ? event.clientY : event.clientX,
+      zoom: this.zoom, pointerId: event.pointerId, capture,
+      cursor: this.root.style.cursor, userSelect: this.root.style.userSelect,
+    };
+    this.root.style.cursor = axis === 'row' ? 'row-resize' : 'col-resize';
+    this.root.style.userSelect = 'none';
+    const doc = this.container.ownerDocument;
+    doc.addEventListener('pointermove', this.onHeaderResizeMove);
+    doc.addEventListener('pointerup', this.onHeaderResizeEnd);
+    doc.addEventListener('pointercancel', this.onHeaderResizeCancel);
+    doc.addEventListener('keydown', this.onHeaderResizeKeyDown, true);
+    capture.addEventListener('lostpointercapture', this.onHeaderResizeCancel);
+    doc.defaultView?.addEventListener('blur', this.cancelHeaderResize);
+    capture.setPointerCapture?.(event.pointerId);
+  };
+
+  private updateHeaderResize(event: PointerEvent): void {
+    const drag = this.headerResize;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const position = drag.axis === 'row' ? event.clientY : event.clientX;
+    // Preserve an existing size below the interactive minimum on a click alone.
+    drag.size = position === drag.start ? drag.originalSize : Math.max(
+      drag.axis === 'row' ? 16 : 24,
+      drag.originalSize + (position - drag.start) / drag.zoom,
+    );
+  }
+
+  private onHeaderResizeMove = (event: PointerEvent): void => {
+    if (this.headerResize?.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    this.updateHeaderResize(event);
+    this.render();
+  };
+
+  private onHeaderResizeEnd = (event: PointerEvent): void => {
+    const drag = this.headerResize;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    this.updateHeaderResize(event);
+    this.clearHeaderResize();
+    if (drag.size !== drag.originalSize) {
+      if (drag.axis === 'row') drag.worksheet.setRowHeight(drag.index, drag.size);
+      else drag.worksheet.setColumnWidth(drag.index, drag.size);
+    }
+    this.render();
+  };
+
+  private onHeaderResizeCancel = (event: PointerEvent): void => {
+    if (this.headerResize?.pointerId === event.pointerId) this.cancelHeaderResize();
+  };
+
+  private onHeaderResizeKeyDown = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    this.cancelHeaderResize();
+  };
+
+  private cancelHeaderResize = (): void => {
+    if (!this.headerResize) return;
+    this.clearHeaderResize();
+    this.render();
+  };
+
+  private clearHeaderResize(): void {
+    const drag = this.headerResize;
+    if (!drag) return;
+    this.headerResize = null;
+    const doc = this.container.ownerDocument;
+    doc.removeEventListener('pointermove', this.onHeaderResizeMove);
+    doc.removeEventListener('pointerup', this.onHeaderResizeEnd);
+    doc.removeEventListener('pointercancel', this.onHeaderResizeCancel);
+    doc.removeEventListener('keydown', this.onHeaderResizeKeyDown, true);
+    drag.capture.removeEventListener('lostpointercapture', this.onHeaderResizeCancel);
+    doc.defaultView?.removeEventListener('blur', this.cancelHeaderResize);
+    if (drag.capture.hasPointerCapture?.(drag.pointerId)) drag.capture.releasePointerCapture(drag.pointerId);
+    this.root.style.cursor = drag.cursor;
+    this.root.style.userSelect = drag.userSelect;
   }
 
   private onFocusIn = (): void => {
@@ -1461,8 +1608,8 @@ export class GridRenderer {
 
   /** Programmatic scroll to make a cell the top-left of the viewport. */
   scrollTo(row: number, column: number): void {
-    this.scrollEl.scrollTop = this.worksheet.rowSizes.offsetOf(row) * this.zoom;
-    this.scrollEl.scrollLeft = this.worksheet.columnSizes.offsetOf(column) * this.zoom;
+    this.scrollEl.scrollTop = this.zOffsetY(row);
+    this.scrollEl.scrollLeft = this.zOffsetX(column);
     this.onScroll();
   }
 
@@ -1521,6 +1668,7 @@ export class GridRenderer {
   private syncWorksheet(): void {
     const next = this.workbook.activeWorksheet;
     if (next === this.worksheet) return;
+    this.clearHeaderResize();
     this.formulaBarEdit = null;
     this.editing.cancel();
     this.unmountEditor();
@@ -1590,7 +1738,7 @@ export class GridRenderer {
       position: 'absolute',
       left: '0',
       top: '0',
-      width: `${this.worksheet.columnSizes.totalSize() * this.zoom}px`,
+      width: `${this.zOffsetX(this.worksheet.columnCount)}px`,
       height: '0',
       pointerEvents: 'none',
     } as CSSStyleDeclaration);
@@ -1674,6 +1822,8 @@ export class GridRenderer {
     this.frozenLeftEl.textContent = '';
     const freezeRows = (this.worksheet as Worksheet & { freezeRows?: number }).freezeRows ?? 0;
     const freezeCols = (this.worksheet as Worksheet & { freezeColumns?: number }).freezeColumns ?? 0;
+    this.frozenTopEl.style.height = `${this.zOffsetY(Math.min(freezeRows, this.worksheet.rowCount))}px`;
+    this.frozenLeftEl.style.width = `${this.zOffsetX(Math.min(freezeCols, this.worksheet.columnCount))}px`;
     if (freezeRows === 0 && freezeCols === 0) return;
 
     const startX = this.scrollLeft();
@@ -1693,6 +1843,15 @@ export class GridRenderer {
       this.applyCellStyle(cell, row, column);
       target.appendChild(cell);
     };
+
+    // Frozen corner cells stay fixed along both axes.
+    for (let r = 0; r < Math.min(freezeRows, this.worksheet.rowCount); r++) {
+      if (this.worksheet.isRowHidden(r)) continue;
+      for (let c = 0; c < Math.min(freezeCols, this.worksheet.columnCount); c++) {
+        if (this.worksheet.isColumnHidden(c)) continue;
+        frozenCell(r, c, this.zOffsetX(c), this.zOffsetY(r), this.frozenTopEl);
+      }
+    }
 
     // frozen top rows: columns follow the scroll viewport
     for (let r = 0; r < Math.min(freezeRows, this.worksheet.rowCount); r++) {
@@ -1750,7 +1909,10 @@ export class GridRenderer {
     this.rowHeaderEl.textContent = '';
     this.cornerEl.textContent = '';
 
-    for (let c = this.scrollCol; c < this.visibleColumnEnd(); c++) {
+    const columns = new Set<number>();
+    for (let c = 0; c < Math.min(ws.freezeColumns, ws.columnCount); c++) columns.add(c);
+    for (let c = this.scrollCol; c < this.visibleColumnEnd(); c++) columns.add(c);
+    for (const c of columns) {
       if (ws.isColumnHidden(c)) continue;
       const el = doc.createElement('div');
       el.className = 'ezygrid-colheader-label';
@@ -1758,7 +1920,8 @@ export class GridRenderer {
       el.textContent = columnLabel(c);
       Object.assign(el.style, {
         position: 'absolute',
-        left: `${this.zOffsetX(c) - this.scrollLeft()}px`,
+        left: `${this.zOffsetX(c) - (c < ws.freezeColumns ? 0 : this.scrollLeft())}px`,
+        zIndex: c < ws.freezeColumns ? '1' : '0',
         top: `${this.nestedLevelCount() * this.options.headerHeight}px`,
         width: `${this.zSizeX(c)}px`,
         height: `${this.options.headerHeight}px`,
@@ -1771,10 +1934,14 @@ export class GridRenderer {
         borderRight: '1px solid var(--ezygrid-gridline, #e2e8f0)',
         borderBottom: '1px solid var(--ezygrid-gridline, #e2e8f0)',
       } as CSSStyleDeclaration);
+      el.appendChild(this.createResizeHandle('column', c));
       this.colHeaderEl.appendChild(el);
     }
     this.renderNestedHeaders(doc);
-    for (let r = this.scrollRow; r < this.visibleRowEnd(); r++) {
+    const rows = new Set<number>();
+    for (let r = 0; r < Math.min(ws.freezeRows, ws.rowCount); r++) rows.add(r);
+    for (let r = this.scrollRow; r < this.visibleRowEnd(); r++) rows.add(r);
+    for (const r of rows) {
       if (ws.isRowHidden(r)) continue;
       const el = doc.createElement('div');
       el.className = 'ezygrid-rowheader-label';
@@ -1783,7 +1950,8 @@ export class GridRenderer {
       Object.assign(el.style, {
         position: 'absolute',
         left: '0',
-        top: `${this.zOffsetY(r) - this.scrollTop()}px`,
+        top: `${this.zOffsetY(r) - (r < ws.freezeRows ? 0 : this.scrollTop())}px`,
+        zIndex: r < ws.freezeRows ? '1' : '0',
         width: `${this.options.headerWidth}px`,
         height: `${this.zSizeY(r)}px`,
         boxSizing: 'border-box',
@@ -1795,11 +1963,28 @@ export class GridRenderer {
         borderRight: '1px solid var(--ezygrid-gridline, #e2e8f0)',
         borderBottom: '1px solid var(--ezygrid-gridline, #e2e8f0)',
       } as CSSStyleDeclaration);
+      el.appendChild(this.createResizeHandle('row', r));
       this.rowHeaderEl.appendChild(el);
     }
     const corner = doc.createElement('div');
     corner.textContent = '';
     this.cornerEl.appendChild(corner);
+  }
+
+  private createResizeHandle(axis: ResizeAxis, index: number): HTMLElement {
+    const handle = this.container.ownerDocument.createElement('div');
+    handle.className = 'ezygrid-resize-handle';
+    handle.dataset.resizeAxis = axis;
+    handle.dataset.resizeIndex = String(index);
+    handle.setAttribute('aria-hidden', 'true');
+    Object.assign(handle.style, {
+      position: 'absolute', right: '0', bottom: '0',
+      width: axis === 'column' ? '6px' : '100%',
+      height: axis === 'row' ? '6px' : '100%',
+      cursor: axis === 'row' ? 'row-resize' : 'col-resize',
+      touchAction: 'none', userSelect: 'none',
+    });
+    return handle;
   }
 
   private nestedLevelCount(): number {
@@ -1859,16 +2044,11 @@ export class GridRenderer {
         }
       }
     }
-    const ws = this.worksheet;
     const primary = this.selection.primary;
     const top = this.zOffsetY(primary.top);
     const left = this.zOffsetX(primary.left);
-    const height =
-      (ws.rowSizes.offsetOf(primary.bottom) + ws.rowSizes.sizeOf(primary.bottom) -
-        ws.rowSizes.offsetOf(primary.top)) * this.zoom;
-    const width =
-      (ws.columnSizes.offsetOf(primary.right) + ws.columnSizes.sizeOf(primary.right) -
-        ws.columnSizes.offsetOf(primary.left)) * this.zoom;
+    const height = this.zOffsetY(primary.bottom + 1) - top;
+    const width = this.zOffsetX(primary.right + 1) - left;
     Object.assign(this.selectionOverlay.style, {
       display: this.selectionVisible ? 'block' : 'none',
       left: `${left}px`,
@@ -1936,8 +2116,14 @@ export class GridRenderer {
     this.root.setAttribute('aria-rowcount', String(ws.rowCount));
     this.root.setAttribute('aria-colcount', String(ws.columnCount));
 
-    this.spacerEl.style.width = `${ws.columnSizes.totalSize() * this.zoom}px`;
-    this.spacerEl.style.height = `${ws.rowSizes.totalSize() * this.zoom}px`;
+    this.spacerEl.style.width = `${this.zOffsetX(ws.columnCount)}px`;
+    this.spacerEl.style.height = `${this.zOffsetY(ws.rowCount)}px`;
+    const headerHeight = (this.nestedLevelCount() + 1) * this.options.headerHeight;
+    this.colHeaderEl.style.height = `${headerHeight}px`;
+    this.cornerEl.style.height = `${headerHeight}px`;
+    for (const el of [this.scrollEl, this.rowHeaderEl, this.frozenTopEl, this.frozenLeftEl]) {
+      el.style.top = `${this.topInset + headerHeight}px`;
+    }
 
     // Zoom and programmatic navigation can render before a native scroll event.
     this.scrollRow = this.visibleRowStart();
@@ -1970,7 +2156,7 @@ export class GridRenderer {
         rowEl.remove();
         this.activeRows.delete(row);
       } else {
-        rowEl.style.width = `${ws.columnSizes.totalSize() * this.zoom}px`;
+        rowEl.style.width = `${this.zOffsetX(ws.columnCount)}px`;
       }
     }
 
@@ -1987,12 +2173,8 @@ export class GridRenderer {
         const offsetY = this.zOffsetY(r);
         const span = merge
           ? {
-              width:
-                (ws.columnSizes.offsetOf(merge.right) + ws.columnSizes.sizeOf(merge.right) -
-                  ws.columnSizes.offsetOf(c)) * this.zoom,
-              height:
-                (ws.rowSizes.offsetOf(merge.bottom) + ws.rowSizes.sizeOf(merge.bottom) -
-                  ws.rowSizes.offsetOf(r)) * this.zoom,
+              width: this.zOffsetX(merge.right + 1) - this.zOffsetX(c),
+              height: this.zOffsetY(merge.bottom + 1) - this.zOffsetY(r),
             }
           : undefined;
         // Already-visible cells are repainted in place so edits, style
@@ -2091,6 +2273,7 @@ export class GridRenderer {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.clearHeaderResize();
     this.resizeObserver?.disconnect();
     this.shell?.destroy();
     this.formulaBarEdit = null;
@@ -2106,6 +2289,8 @@ export class GridRenderer {
     this.container.removeEventListener('focusin', this.onFocusIn);
     this.container.removeEventListener('focusout', this.onFocusOut);
     this.scrollEl?.removeEventListener('scroll', this.onScroll);
+    this.colHeaderEl?.removeEventListener('pointerdown', this.onHeaderResizeStart);
+    this.rowHeaderEl?.removeEventListener('pointerdown', this.onHeaderResizeStart);
     this.cellLayer?.removeEventListener('mousedown', this.onMouseDown);
     this.cellLayer?.removeEventListener('dblclick', this.onDoubleClick);
     this.cellLayer?.removeEventListener('contextmenu', this.onContextMenu);

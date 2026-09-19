@@ -15,6 +15,7 @@ import {
   type MetaCellSnapshot,
   type MetaSetPayload,
   type MergesSetPayload,
+  type ResizePayload,
 } from '@ezygrid/model';
 import { Parser, DependencyGraph, FormulaError, type RuntimeValue, isMatrix, type MatrixValue } from '@ezygrid/formula';
 import { MergeStore } from './merges.js';
@@ -214,6 +215,28 @@ export class Worksheet {
   }
 
   // ── Visibility (§15.1/§15.2): hide/show rows and columns ────────────────
+
+  /** Set the height of a zero-based row in unscaled pixels, with undo/redo. */
+  setRowHeight(index: number, height: number): void {
+    this.setAxisSize('row', index, height);
+  }
+
+  /** Set the width of a zero-based column in unscaled pixels, with undo/redo. */
+  setColumnWidth(index: number, width: number): void {
+    this.setAxisSize('column', index, width);
+  }
+
+  private setAxisSize(axis: 'row' | 'column', index: number, size: number): void {
+    const sizes = axis === 'row' ? this.rowSizes : this.columnSizes;
+    const previous = sizes.sizeOf(index);
+    sizes.setSize(index, size);
+    if (previous === size) return;
+    const type = axis === 'row' ? 'rows.resize' : 'columns.resize';
+    this.workbook.emitOperation(
+      op<ResizePayload>(this.workbook.id, type, { index, size }, this.id),
+      [op<ResizePayload>(this.workbook.id, type, { index, size: previous }, this.id)],
+    );
+  }
 
   readonly hiddenRows = new Set<number>();
   readonly hiddenColumns = new Set<number>();
@@ -1559,6 +1582,15 @@ export class Workbook {
       case 'merges.set':
         this.applyMergesSet(operation.payload as MergesSetPayload, operation.worksheetId);
         break;
+      case 'rows.resize':
+      case 'columns.resize': {
+        const sheet = this.worksheets.find((w) => w.id === operation.worksheetId);
+        if (!sheet) break;
+        const { index, size } = operation.payload as ResizePayload;
+        const sizes = operation.type === 'rows.resize' ? sheet.rowSizes : sheet.columnSizes;
+        sizes.setSize(index, size);
+        break;
+      }
       case 'rows.insert': {
         const { index, count } = operation.payload as { index: number; count: number };
         this.worksheets.find((w) => w.id === operation.worksheetId)?.applyRowsInsert(index, count);
@@ -1674,6 +1706,7 @@ export class Workbook {
         return transformed === body ? formula : `=${transformed}`;
       },
       mapRange,
+      (axis, index) => axis === kind ? shiftPosition(index, at, delta) : index,
     );
   }
 

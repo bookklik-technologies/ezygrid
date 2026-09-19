@@ -1,4 +1,4 @@
-import type { Operation } from './operations.js';
+import type { Operation, ResizePayload } from './operations.js';
 
 /**
  * History service: undo/redo over inverse-producing operations.
@@ -130,6 +130,7 @@ export class HistoryService {
     mapper: CoordinateMapper,
     rewriter?: HistoryFormulaRewriter,
     rangeMapper?: RangeMapper,
+    axisMapper?: (axis: 'row' | 'column', index: number) => number | undefined,
   ): void {
     const apply = (entry: HistoryEntry): void => {
       // The in-flight entry is expressed in the geometry its own replay is
@@ -143,6 +144,13 @@ export class HistoryService {
             this.mapOperationRanges(operation, rangeMapper);
           }
           if (operation.worksheetId !== sheetId) continue;
+          if (axisMapper && (operation.type === 'rows.resize' || operation.type === 'columns.resize')) {
+            const payload = operation.payload as ResizePayload;
+            const mapped = axisMapper(operation.type === 'rows.resize' ? 'row' : 'column', payload.index);
+            if (mapped === undefined) operations.splice(i, 1);
+            else payload.index = mapped;
+            continue;
+          }
           const dropped = this.mapOperationCells(operation, mapper);
           if (dropped) operations.splice(i, 1);
         }

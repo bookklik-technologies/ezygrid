@@ -18,6 +18,20 @@ Structural changes:
 - Translate relative formula references (absolute refs stay put; off-sheet refs become `#REF!`)
 - Clamp selection ranges and merges
 
+## Resizing rows and columns
+
+Drag the right edge of a column header or the bottom edge of a row header to resize it. Cells follow the pointer immediately, including when scrolled or zoomed. Release to save one undoable change, or press Escape to cancel. Dragging affects only that row or column, with a minimum column width of 24px and row height of 16px before zoom.
+
+Set exact dimensions through the [Worksheet API](../api/worksheet.md#structure):
+
+```ts
+const sheet = editor.workbook.activeWorksheet;
+sheet.setColumnWidth(0, 180);
+sheet.setRowHeight(0, 40);
+```
+
+Indexes are zero-based and dimensions are unscaled pixels. Both methods update the grid automatically and support undo/redo. A drag preview is not saved until release; changing sheets, changing zoom, or losing window focus cancels it.
+
 ## Merged cells
 
 ```ts
