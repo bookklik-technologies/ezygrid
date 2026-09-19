@@ -19,8 +19,8 @@ export const defaultThemeTokens: ThemeTokens = {
   gridline: '#e2e8f0',
   selection: '#00c47a',
   selectionSoft: 'rgba(0, 196, 122, 0.12)',
-  headerBg: '#e6fff4',
-  headerText: '#00674a',
+  headerBg: '#f1f5f9',
+  headerText: '#334155',
   tableBand: 'rgba(0, 196, 122, 0.06)',
 };
 

@@ -1,3 +1,5 @@
+import { suiteTopbarStyles } from './suite-topbar-styles.js';
+
 export const editorStyles = `
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap');
 .ezygrid-suite{--ezg-surface:#f7f9fb;--ezg-muted:#64748b;position:relative;display:flex;flex-direction:column;width:100%;height:100%;min-height:220px;overflow:hidden;box-sizing:border-box;border:1px solid var(--ezygrid-gridline,#e2e8f0);border-radius:0px;background:var(--ezygrid-bg,#fff);color:var(--ezygrid-text,#0f172a);font:13px Outfit,-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,Roboto,'Helvetica Neue',sans-serif;isolation:isolate}
@@ -18,7 +20,7 @@ export const editorStyles = `
 .ezg-brand{display:flex;align-items:center;gap:8px;font-size:16px;font-weight:600;margin-inline-end:8px}
 .ezg-mark{display:grid;place-items:center;width:28px;height:28px;border-radius:6px;overflow:hidden;flex-shrink:0}
 .ezg-mark svg{width:28px;height:28px;display:block}
-.ezg-title{width:180px!important;border-color:transparent!important;font-weight:500!important}
+.ezg-title{width:180px;border-color:transparent;font-weight:500}
 .ezg-spacer{flex:1}
 .ezygrid-suite .ezg-primary{background:var(--ezygrid-selection,#00c47a);color:#052e24;font-weight:600}
 .ezg-tabs{display:flex;align-items:center;gap:2px;padding:3px 10px 0;overflow-x:auto;flex-shrink:0;border-bottom:1px solid var(--ezygrid-gridline,#e2e8f0)}
@@ -46,7 +48,9 @@ export const editorStyles = `
 .ezg-export .ezg-chevron svg{width:14px;height:14px;transition:transform .15s ease}
 .ezg-export.ezg-menu-open .ezg-chevron svg{transform:rotate(180deg)}
 .ezygrid-suite [hidden]{display:none!important}
-@media(max-width:700px){.ezg-brand{font-size:0;margin:0}.ezg-title{width:110px!important}.ezg-topbar{gap:3px;padding:6px}.ezg-topbar .ezg-optional{display:none}.ezg-stats{display:none}.ezg-panel{position:absolute;inset-inline-end:0;top:0;bottom:0;width:min(300px,90%);z-index:20;box-shadow:-4px 0 20px #0001}.ezg-tabs button{padding:6px 9px}}
+@media(max-width:700px){.ezg-brand{font-size:0;margin:0}.ezg-title{width:110px}.ezg-topbar{gap:3px;padding:6px}.ezg-topbar .ezg-optional{display:none}.ezg-stats{display:none}.ezg-panel{position:absolute;inset-inline-end:0;top:0;bottom:0;width:min(300px,90%);z-index:20;box-shadow:-4px 0 20px #0001}.ezg-tabs button{padding:6px 9px}}
+${suiteTopbarStyles}
+.ezygrid-suite > .ezy-suite-topbar{--suite-export-bg:var(--ezygrid-selection,#00c47a);--suite-export-text:#052e24}
 `;
 
 export function installEditorStyles(doc: Document): void {

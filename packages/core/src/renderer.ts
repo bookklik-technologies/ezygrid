@@ -470,7 +470,7 @@ export class GridRenderer {
       left: '0',
       width: `${this.options.headerWidth}px`,
       height: `${this.options.headerHeight}px`,
-      background: 'var(--ezygrid-header-bg, #e6fff4)',
+      background: 'var(--ezygrid-header-bg, #f1f5f9)',
       borderRight: '1px solid var(--ezygrid-gridline, #e2e8f0)',
       borderBottom: '1px solid var(--ezygrid-gridline, #e2e8f0)',
     } as CSSStyleDeclaration);
@@ -615,6 +615,8 @@ export class GridRenderer {
       } as CSSStyleDeclaration);
       this.root.appendChild(this.contextMenuEl);
       this.cellLayer.addEventListener('contextmenu', this.onContextMenu);
+      this.colHeaderEl.addEventListener('contextmenu', this.onHeaderContextMenu);
+      this.rowHeaderEl.addEventListener('contextmenu', this.onHeaderContextMenu);
       doc.addEventListener('mousedown', this.onGlobalMouseDown);
     }
 
@@ -845,10 +847,7 @@ export class GridRenderer {
   };
 
   private showContextMenu(clientX: number, clientY: number): void {
-    const menu = this.contextMenuEl;
-    if (!menu) return;
-    const doc = this.container.ownerDocument;
-    menu.textContent = '';
+    if (!this.contextMenuEl) return;
     const items: { label: string; run: () => void }[] = [
       { label: 'Cut', run: () => this.commands.execute('clipboard.cut', this.commandContext()) },
       { label: 'Copy', run: () => this.commands.execute('clipboard.copy', this.commandContext()) },
@@ -866,6 +865,14 @@ export class GridRenderer {
         run: () => this.commands.execute('format.clear', this.commandContext()),
       },
     ];
+    this.renderContextMenu(items, clientX, clientY);
+  }
+
+  private renderContextMenu(items: { label: string; run: () => void }[], clientX: number, clientY: number): void {
+    const menu = this.contextMenuEl;
+    if (!menu) return;
+    const doc = this.container.ownerDocument;
+    menu.textContent = '';
     menu.setAttribute('role', 'menu');
     for (const item of items) {
       const el = doc.createElement('div');
@@ -906,6 +913,112 @@ export class GridRenderer {
     const bounds = menu.getBoundingClientRect();
     menu.style.left = `${Math.max(0, Math.min(clientX, (doc.defaultView?.innerWidth ?? clientX + bounds.width) - bounds.width))}px`;
     menu.style.top = `${Math.max(0, Math.min(clientY, (doc.defaultView?.innerHeight ?? clientY + bounds.height) - bounds.height))}px`;
+  }
+
+  private onHeaderContextMenu = (event: MouseEvent): void => {
+    if (!this.contextMenuEl) return;
+    const label = (event.target as HTMLElement).closest<HTMLElement>('.ezygrid-colheader-label, .ezygrid-rowheader-label');
+    if (!label) return;
+    const isColumn = label.classList.contains('ezygrid-colheader-label');
+    const index = Number(isColumn ? label.dataset.columnHeader : label.dataset.rowHeader);
+    if (!Number.isInteger(index) || index < 0) return;
+    event.preventDefault();
+    this.commitEdits();
+    this.root.focus({ preventScroll: true });
+    const axis: ResizeAxis = isColumn ? 'column' : 'row';
+    const current = Math.round(this.axisSize(axis, index) * 100) / 100;
+    this.renderContextMenu([{
+      label: isColumn ? `Column width… (${current}px)` : `Row height… (${current}px)`,
+      run: () => this.promptAxisSize(axis, index),
+    }], event.clientX, event.clientY);
+  };
+
+  private promptAxisSize(axis: ResizeAxis, index: number): void {
+    const minimum = axis === 'row' ? 16 : 24;
+    const doc = this.container.ownerDocument;
+    const dialog = doc.createElement('dialog');
+    dialog.setAttribute('aria-label', axis === 'column' ? 'Column width' : 'Row height');
+    Object.assign(dialog.style, {
+      border: '1px solid var(--ezygrid-gridline, #e2e8f0)',
+      borderRadius: '14px',
+      background: 'var(--ezygrid-bg, #fff)',
+      color: 'var(--ezygrid-text, #0f172a)',
+      padding: '18px',
+      width: 'min(280px, 90%)',
+      boxShadow: '0 20px 70px rgba(0,0,0,.25)',
+    } as CSSStyleDeclaration);
+    const heading = doc.createElement('h2');
+    heading.textContent = axis === 'column' ? 'Column width' : 'Row height';
+    Object.assign(heading.style, { fontSize: '15px', fontWeight: '600', margin: '0 0 12px' });
+    const form = doc.createElement('form');
+    form.method = 'dialog';
+    const label = doc.createElement('label');
+    label.textContent = axis === 'column' ? 'Width (px)' : 'Height (px)';
+    Object.assign(label.style, { display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' });
+    const input = doc.createElement('input');
+    input.type = 'number';
+    input.name = 'size';
+    input.required = true;
+    input.min = String(minimum);
+    input.max = '2000';
+    input.step = 'any';
+    input.setAttribute('aria-label', axis === 'column' ? 'Column width in pixels' : 'Row height in pixels');
+    input.value = String(Math.round(this.axisSize(axis, index) * 100) / 100);
+    Object.assign(input.style, {
+      border: '1px solid var(--ezygrid-gridline, #e2e8f0)',
+      borderRadius: '6px',
+      background: 'var(--ezygrid-bg, #fff)',
+      color: 'inherit',
+      padding: '5px 7px',
+      font: 'inherit',
+      minWidth: '0',
+    } as CSSStyleDeclaration);
+    const actions = doc.createElement('div');
+    Object.assign(actions.style, { display: 'flex', gap: '6px', justifyContent: 'flex-end', marginTop: '14px' });
+    const cancel = doc.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'Cancel';
+    Object.assign(cancel.style, {
+      border: '1px solid var(--ezygrid-gridline, #e2e8f0)',
+      borderRadius: '6px',
+      background: 'transparent',
+      color: 'inherit',
+      padding: '5px 9px',
+      cursor: 'pointer',
+      font: 'inherit',
+    } as CSSStyleDeclaration);
+    const apply = doc.createElement('button');
+    apply.type = 'submit';
+    apply.textContent = 'Apply';
+    Object.assign(apply.style, {
+      border: '0',
+      borderRadius: '6px',
+      background: 'var(--ezygrid-selection, #00c47a)',
+      color: '#052e24',
+      fontWeight: '600',
+      padding: '5px 9px',
+      cursor: 'pointer',
+      font: 'inherit',
+    } as CSSStyleDeclaration);
+    cancel.addEventListener('click', () => dialog.close());
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (!form.reportValidity()) return;
+      const size = Number(input.value);
+      if (!Number.isFinite(size) || size < minimum) return;
+      if (axis === 'row') this.worksheet.setRowHeight(index, size);
+      else this.worksheet.setColumnWidth(index, size);
+      this.render();
+      dialog.close();
+    });
+    label.append(input);
+    actions.append(cancel, apply);
+    form.append(label, actions);
+    dialog.append(heading, form);
+    this.root.append(dialog);
+    dialog.addEventListener('close', () => { dialog.remove(); this.focus(); }, { once: true });
+    dialog.showModal();
+    input.select();
   }
 
   private onFillDragEnd = (event: MouseEvent): void => {
@@ -1918,6 +2031,7 @@ export class GridRenderer {
       el.className = 'ezygrid-colheader-label';
       el.setAttribute('role', 'columnheader');
       el.textContent = columnLabel(c);
+      el.dataset.columnHeader = String(c);
       Object.assign(el.style, {
         position: 'absolute',
         left: `${this.zOffsetX(c) - (c < ws.freezeColumns ? 0 : this.scrollLeft())}px`,
@@ -1928,8 +2042,8 @@ export class GridRenderer {
         boxSizing: 'border-box',
         textAlign: 'center',
         lineHeight: `${this.options.headerHeight}px`,
-        background: 'var(--ezygrid-header-bg, #e6fff4)',
-        color: 'var(--ezygrid-header-text, #00674a)',
+        background: 'var(--ezygrid-header-bg, #f1f5f9)',
+        color: 'var(--ezygrid-header-text, #334155)',
         fontWeight: 'bold',
         borderRight: '1px solid var(--ezygrid-gridline, #e2e8f0)',
         borderBottom: '1px solid var(--ezygrid-gridline, #e2e8f0)',
@@ -1947,6 +2061,7 @@ export class GridRenderer {
       el.className = 'ezygrid-rowheader-label';
       el.setAttribute('role', 'rowheader');
       el.textContent = String(r + 1);
+      el.dataset.rowHeader = String(r);
       Object.assign(el.style, {
         position: 'absolute',
         left: '0',
@@ -1958,8 +2073,8 @@ export class GridRenderer {
         textAlign: 'right',
         paddingRight: '6px',
         lineHeight: `${this.zSizeY(r)}px`,
-        background: 'var(--ezygrid-header-bg, #e6fff4)',
-        color: 'var(--ezygrid-header-text, #00674a)',
+        background: 'var(--ezygrid-header-bg, #f1f5f9)',
+        color: 'var(--ezygrid-header-text, #334155)',
         borderRight: '1px solid var(--ezygrid-gridline, #e2e8f0)',
         borderBottom: '1px solid var(--ezygrid-gridline, #e2e8f0)',
       } as CSSStyleDeclaration);

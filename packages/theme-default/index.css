@@ -10,7 +10,7 @@
   --ezygrid-gridline: #e2e8f0;
   --ezygrid-selection: #00c47a;
   --ezygrid-selection-soft: rgba(0, 196, 122, 0.12);
-  --ezygrid-header-bg: #e6fff4;
-  --ezygrid-header-text: #00674a;
+  --ezygrid-header-bg: #f1f5f9;
+  --ezygrid-header-text: #334155;
   --ezygrid-table-band: rgba(0, 196, 122, 0.06);
 }

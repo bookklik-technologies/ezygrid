@@ -72,3 +72,5 @@ Dragging the small corner handle expands the selection; holding **Alt** before d
 ## Context menu
 
 Right-click offers Cut, Copy, Paste, Edit cell, Fill down, Clear contents and Clear formatting. Disable with `renderer: { contextMenu: false }`.
+
+Right-clicking a column or row header offers **Column width…** or **Row height…**, which opens a dialog to set the exact size in pixels (minimum 24px for columns, 16px for rows). Changes are undoable like drag-resizing.

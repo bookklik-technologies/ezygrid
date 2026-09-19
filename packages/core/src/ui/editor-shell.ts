@@ -7,6 +7,7 @@ import { openPanel } from './panels.js';
 import { workbookFromXlsx, workbookToXlsx } from '../xlsx/index.js';
 import { buildPrintHtml, printHtml } from '../print.js';
 import { darkThemeTokens, defaultThemeTokens } from '../theme.js';
+import { installSuiteTopbar, openSuiteMenu, bindSuiteMenu } from './suite-topbar.js';
 
 // Official Ezygrid brand mark — keep in sync with the repository's icon.svg
 // (viewBox normalized and gradient id namespaced so multiple editors on one
@@ -70,6 +71,8 @@ const commandIcons: Record<string, string> = {
 };
 
 type Group = [string, string[]];
+type ThemeChoice = 'light' | 'dark' | 'system';
+const THEME_LABELS: Record<ThemeChoice, string> = { light: 'Light', dark: 'Dark', system: 'System' };
 const ribbons: Record<string, Group[]> = {
   File: [['Workbook', ['file.new', 'file.open', 'file.save']], ['Import / export', ['file.csvImport', 'file.csvExport', 'file.xlsxExport']], ['Print', ['file.print']]],
   Home: [['Clipboard', ['clipboard.cut', 'clipboard.copy', 'clipboard.paste']], ['History', ['edit.undo', 'edit.redo']], ['Font', ['format.bold', 'format.italic', 'format.underline']], ['Alignment', ['format.left', 'format.center', 'format.right', 'format.wrap', 'panel.format']], ['Cells', ['cells.merge', 'cells.unmerge', 'cells.fillDown', 'cells.fill', 'cells.clear', 'format.clear']], ['Find', ['panel.find']]],
@@ -102,8 +105,15 @@ export class EditorShell {
   private sheetSignature = '';
   private formulaVisible: boolean;
   private exportButton: HTMLButtonElement;
-  private exportMenu?: HTMLElement;
-  private exportDismiss?: (event: MouseEvent) => void;
+  private exportCleanup?: () => void;
+  private topbarCleanup: () => void;
+  private themeMenu: HTMLDetailsElement;
+  private themeMenuCleanup: () => void;
+  private fullscreenButton: HTMLButtonElement;
+  private themeChoice: ThemeChoice = 'light';
+  private themeMedia?: MediaQueryList;
+  private themeMediaListener?: (event: MediaQueryListEvent) => void;
+  private onFullscreenChange: () => void;
 
   constructor(container: HTMLElement, grid: HTMLElement, readonly workbook: Workbook, readonly renderer: GridRenderer, options: Required<GridRendererOptions>) {
     this.doc = container.ownerDocument;
@@ -121,9 +131,37 @@ export class EditorShell {
     brand.append(mark, node(this.doc, 'span', '', 'Ezygrid'));
     this.filename = node(this.doc, 'input', 'ezg-title');
     this.filename.setAttribute('aria-label', 'Workbook filename');
+    this.filename.spellcheck = false;
+    this.filename.addEventListener('keydown', event => { if (event.key === 'Enter') this.filename.blur(); });
     this.filename.addEventListener('change', () => this.mutate(() => { workbook.filename = this.filename.value.trim() || 'Untitled workbook'; }));
-    top.append(brand, this.filename, this.commandButton('edit.undo'), this.commandButton('edit.redo'), node(this.doc, 'div', 'ezg-spacer'));
-    for (const [id, icon] of [['file.open', 'open'], ['file.save', 'save'], ['view.fullscreen', 'expand']] as const) top.append(this.commandButton(id, icon));
+    const history = node(this.doc, 'div');
+    history.setAttribute('aria-label', 'Edit history');
+    history.append(this.commandButton('edit.undo'), this.commandButton('edit.redo'));
+    const view = node(this.doc, 'div');
+    view.setAttribute('aria-label', 'View');
+    this.themeMenu = node(this.doc, 'details', 'ez-theme-menu') as HTMLDetailsElement;
+    const themeSummary = node(this.doc, 'summary');
+    themeSummary.setAttribute('aria-label', 'Theme');
+    themeSummary.title = 'Theme';
+    const themePanel = node(this.doc, 'div', 'ez-theme-panel');
+    themePanel.setAttribute('aria-label', 'Color scheme');
+    for (const theme of ['light', 'dark', 'system'] as ThemeChoice[]) {
+      const item = button(this.doc, THEME_LABELS[theme], () => {
+        if (this.themeMenu?.contains(this.doc.activeElement)) this.themeMenu!.querySelector('summary')?.focus();
+        this.setThemeChoice(theme);
+        if (this.themeMenu) this.themeMenu.open = false;
+      });
+      item.dataset.ezThemeChoice = theme;
+      item.setAttribute('aria-pressed', 'false');
+      themePanel.append(item);
+    }
+    this.themeMenu.append(themeSummary, themePanel);
+    this.themeMenuCleanup = bindSuiteMenu(this.themeMenu, themePanel);
+    this.fullscreenButton = button(this.doc, 'Fullscreen', () => this.execute('view.fullscreen'), 'expand');
+    view.append(this.themeMenu, this.fullscreenButton);
+    const files = node(this.doc, 'div');
+    files.setAttribute('aria-label', 'Files');
+    files.append(this.commandButton('file.open', 'open'), this.commandButton('file.save', 'save'));
     const chevron = node(this.doc, 'span', 'ezg-chevron');
     chevron.append(icon(this.doc, 'chevronDown'));
     const download = button(this.doc, 'Export', () => this.toggleExportMenu(), 'export');
@@ -132,7 +170,8 @@ export class EditorShell {
     download.setAttribute('aria-expanded', 'false');
     download.append(node(this.doc, 'span', '', 'Export'), chevron);
     this.exportButton = download;
-    top.append(download);
+    this.topbarCleanup = installSuiteTopbar(this.root, top, { brand, title: this.filename, history, view, files, exportControl: download });
+    this.refreshThemeMenu();
     this.tabBar = node(this.doc, 'div', 'ezg-tabs');
     this.tabBar.setAttribute('role', 'tablist');
     this.tabBar.setAttribute('aria-label', 'Ribbon');
@@ -185,6 +224,9 @@ export class EditorShell {
     container.append(this.root);
     this.selectTab('Home');
     this.root.addEventListener('keydown', this.onKeyDown);
+    this.onFullscreenChange = () => this.refreshFullscreen();
+    this.doc.addEventListener('fullscreenchange', this.onFullscreenChange);
+    this.refreshFullscreen();
     this.unlisten = workbook.onOperation((operation) => {
       if (operation.type === 'document.load') this.savedDocument = JSON.stringify(workbook.toJSON());
       if (['document.load', 'worksheet.activate', 'worksheet.remove', 'undo', 'redo'].includes(operation.type)) this.closePanel();
@@ -267,12 +309,7 @@ export class EditorShell {
     register('view.formula', 'Formula bar', () => { this.formulaVisible = !this.formulaVisible; this.renderer.setFormulaBarVisible(this.formulaVisible); });
     register('view.ribbon', 'Collapse ribbon', () => { this.ribbon.hidden = !this.ribbon.hidden; });
     register('view.theme', 'Light / dark', () => {
-      const dark = this.root.dataset.theme !== 'dark';
-      this.root.dataset.theme = dark ? 'dark' : 'light';
-      const tokens = dark ? { ...defaultThemeTokens, ...darkThemeTokens } : defaultThemeTokens;
-      for (const target of [this.root, this.root.querySelector<HTMLElement>('[role=grid]')!]) {
-        for (const [key, value] of Object.entries(tokens)) target.style.setProperty(`--ezygrid-${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`, value);
-      }
+      this.setThemeChoice(this.root.dataset.theme === 'dark' ? 'light' : 'dark');
     });
     register('view.fullscreen', 'Fullscreen', () => {
       const promise = this.doc.fullscreenElement === this.root ? this.doc.exitFullscreen() : this.root.requestFullscreen?.();
@@ -282,6 +319,55 @@ export class EditorShell {
   }
 
   private currentStyle(): CellStyle { const { row, column } = this.renderer.selection.state.active; return this.sheet.getStyle(row, column) ?? {}; }
+
+  /** Applies a raw theme selection; 'system' resolves through prefers-color-scheme and keeps following it. */
+  private setThemeChoice(choice: ThemeChoice): void {
+    this.themeChoice = choice;
+    const dark = choice === 'system' ? this.resolveSystemTheme() : choice === 'dark';
+    this.root.dataset.theme = dark ? 'dark' : 'light';
+    const tokens = dark ? { ...defaultThemeTokens, ...darkThemeTokens } : defaultThemeTokens;
+    for (const target of [this.root, this.root.querySelector<HTMLElement>('[role=grid]')!]) {
+      for (const [key, value] of Object.entries(tokens)) target.style.setProperty(`--ezygrid-${key.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}`, value);
+    }
+    this.refreshThemeMenu();
+    this.syncThemeMedia();
+  }
+
+  private resolveSystemTheme(): boolean {
+    try { return this.doc.defaultView?.matchMedia('(prefers-color-scheme: dark)').matches ?? false; }
+    catch { return false; }
+  }
+
+  private syncThemeMedia(): void {
+    const win = this.doc.defaultView;
+    if (!win || typeof win.matchMedia !== 'function') return;
+    if (this.themeChoice === 'system') {
+      if (this.themeMedia) return;
+      this.themeMedia = win.matchMedia('(prefers-color-scheme: dark)');
+      this.themeMediaListener = () => { if (this.themeChoice === 'system') this.setThemeChoice('system'); };
+      this.themeMedia.addEventListener?.('change', this.themeMediaListener);
+    } else if (this.themeMedia) {
+      this.themeMedia.removeEventListener?.('change', this.themeMediaListener!);
+      this.themeMedia = undefined;
+      this.themeMediaListener = undefined;
+    }
+  }
+
+  private refreshThemeMenu(): void {
+    if (!this.themeMenu) return;
+    const summary = this.themeMenu.querySelector<HTMLElement>('summary');
+    if (summary) summary.replaceChildren(icon(this.doc, this.themeChoice === 'dark' ? 'moon' : this.themeChoice === 'light' ? 'sun' : 'monitor'));
+    for (const item of this.themeMenu.querySelectorAll<HTMLButtonElement>('[data-ez-theme-choice]')) {
+      item.setAttribute('aria-pressed', String(item.dataset.ezThemeChoice === this.themeChoice));
+    }
+  }
+
+  private refreshFullscreen(): void {
+    const active = this.doc.fullscreenElement === this.root;
+    this.fullscreenButton.replaceChildren(icon(this.doc, active ? 'shrink' : 'expand'));
+    this.fullscreenButton.title = active ? 'Exit fullscreen' : 'Enter fullscreen';
+    this.fullscreenButton.setAttribute('aria-label', this.fullscreenButton.title);
+  }
 
   private selectTab(title: string): void {
     this.activeTab = title;
@@ -404,68 +490,19 @@ export class EditorShell {
   confirm(title: string, apply: () => void): void { this.dialog(title, [], apply, 'Continue'); }
 
   private toggleExportMenu(): void {
-    if (this.exportMenu) this.closeExportMenu();
-    else this.showExportMenu();
-  }
-
-  private showExportMenu(): void {
+    const open = this.exportButton.getAttribute('aria-expanded') === 'true';
     this.closeExportMenu();
-    this.exportButton.classList.add('ezg-menu-open');
-    this.exportButton.setAttribute('aria-expanded', 'true');
-    const menu = node(this.doc, 'div', 'ezygrid-contextmenu ezg-export-menu');
-    menu.setAttribute('role', 'menu');
-    menu.setAttribute('aria-label', 'Export workbook');
-    const items: { label: string; run: () => void }[] = [
-      { label: 'Excel (.xlsx)', run: () => this.execute('file.xlsxExport') },
-      { label: 'CSV (active sheet)', run: () => this.execute('file.csvExport') },
-      { label: 'Ezygrid JSON', run: () => this.execute('file.save') },
-    ];
-    for (const item of items) {
-      const row = node(this.doc, 'div', 'ezygrid-contextmenu-item', item.label);
-      row.setAttribute('role', 'menuitem');
-      row.tabIndex = 0;
-      row.addEventListener('click', () => {
-        this.closeExportMenu();
-        item.run();
-      });
-      menu.append(row);
-    }
-    menu.addEventListener('keydown', (event) => {
-      if (event.key === 'Escape') { event.preventDefault(); this.closeExportMenu(); this.renderer.focus(); }
-      else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault();
-        const target = event.target as HTMLElement;
-        const next = event.key === 'ArrowDown' ? target.nextElementSibling ?? menu.firstElementChild : target.previousElementSibling ?? menu.lastElementChild;
-        (next as HTMLElement)?.focus();
-      }
-      event.stopPropagation();
-    });
-    const buttonRect = this.exportButton.getBoundingClientRect();
-    const rootRect = this.root.getBoundingClientRect();
-    if (this.root.dir === 'rtl') menu.style.left = `${buttonRect.left - rootRect.left}px`;
-    else menu.style.right = `${Math.max(0, rootRect.right - buttonRect.right)}px`;
-    menu.style.top = `${buttonRect.bottom - rootRect.top + 4}px`;
-    this.exportMenu = menu;
-    this.exportDismiss = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (this.exportButton.contains(target) || menu.contains(target)) return;
-      this.closeExportMenu();
-    };
-    this.doc.addEventListener('mousedown', this.exportDismiss, true);
-    this.root.append(menu);
-    (menu.firstElementChild as HTMLElement)?.focus();
+    if (open) return;
+    this.exportCleanup = openSuiteMenu(this.exportButton, [
+      { label: 'Excel (.xlsx)', action: () => this.execute('file.xlsxExport') },
+      { label: 'CSV (active sheet)', action: () => this.execute('file.csvExport') },
+      { label: 'Ezygrid JSON', action: () => this.execute('file.save') },
+    ]);
   }
 
   private closeExportMenu(): void {
-    if (!this.exportMenu) return;
-    this.exportMenu.remove();
-    this.exportMenu = undefined;
-    this.exportButton.classList.remove('ezg-menu-open');
-    this.exportButton.setAttribute('aria-expanded', 'false');
-    if (this.exportDismiss) {
-      this.doc.removeEventListener('mousedown', this.exportDismiss, true);
-      this.exportDismiss = undefined;
-    }
+    this.exportCleanup?.();
+    this.exportCleanup = undefined;
   }
 
   message(error: unknown): void {
@@ -527,6 +564,14 @@ export class EditorShell {
   destroy(): void {
     this.disposed = true;
     this.unlisten();
+    this.topbarCleanup();
+    this.themeMenuCleanup();
+    this.doc.removeEventListener('fullscreenchange', this.onFullscreenChange);
+    if (this.themeMedia) {
+      this.themeMedia.removeEventListener?.('change', this.themeMediaListener!);
+      this.themeMedia = undefined;
+      this.themeMediaListener = undefined;
+    }
     this.closeExportMenu();
     this.root.removeEventListener('keydown', this.onKeyDown);
     this.root.remove();
