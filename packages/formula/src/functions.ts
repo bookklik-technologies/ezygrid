@@ -292,7 +292,7 @@ const asMatrixArg = (args: RuntimeValue[], nodes: AstNode[], ctx: EvalContext, i
   return matrixFromNode(node, ctx);
 };
 
-/** Tier-A function registry (MVP set from the dev plan §14.5). */
+/** Tier-A function registry. */
 export const FUNCTIONS: Record<string, FunctionImpl> = {
   SUM: (args) => numbersOf(args).reduce((a, b) => a + b, 0),
   AVERAGE: (args) => {

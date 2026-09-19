@@ -3,13 +3,39 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![GitHub](https://img.shields.io/badge/GitHub-bookklik--technologies%2Fezygrid-blue.svg)](https://github.com/bookklik-technologies/ezygrid)
 
-Framework-agnostic JavaScript/TypeScript spreadsheet and data-grid library by [Bookklik Technologies](https://github.com/bookklik-technologies).
+Framework-agnostic JavaScript/TypeScript spreadsheet and data-grid library by
+[Bookklik Technologies](https://github.com/bookklik-technologies).
 
 ![Ezygrid preview](ezygrid-preview.png)
 
-## Initialize a spreadsheet
+## Features
 
-Give the host a height, then initialize it with JavaScript:
+- Spreadsheet and data-grid engine with a workbook/worksheet facade
+- Excel-compatible formula engine — lexer/parser/AST, dependency graph, function library
+- Sparse document model with stable IDs, A1 utilities and a typed operation format
+- Rendering, selection, editing and history
+- Declarative (`data-ezg-editor`), programmatic and script-tag initialization
+- Framework integrations for Angular, React, Vue and a web component
+
+## Documentation
+
+Full guides and API reference: <https://bookklik-technologies.github.io/ezygrid/>
+
+## Quick start
+
+### Declarative (browser bundle)
+
+```html
+<div data-ezg-editor style="height: 460px"></div>
+<script src="/ezygrid/ezygrid.js"></script>
+```
+
+Copy the complete `packages/core/dist/browser/` directory to your static
+assets (build it from this repository with `pnpm build`). The loader fetches
+its dependency files relative to itself and enables declarative startup
+automatically — no consumer bundling step is required.
+
+### ESM / bundlers
 
 ```html
 <div id="editor" style="height: 460px"></div>
@@ -21,37 +47,19 @@ import { Ezygrid } from '@ezygrid/core';
 const editor = new Ezygrid({ target: '#editor' });
 ```
 
-Or use declarative markup with the automatic startup entry point:
-
-```html
-<div data-ezg-editor style="height: 460px"></div>
-```
+Or use the automatic startup entry point with declarative markup:
 
 ```js
 import '@ezygrid/core/auto';
 ```
 
-For an ordinary script tag, copy the complete `packages/core/dist/browser/`
-directory to your static assets and include its loader:
+See [Getting started](docs/getting-started.md) for configuration, lifecycle,
+and dynamic hosts.
 
-```html
-<script src="/ezygrid/ezygrid.js"></script>
-<script>
-  Ezygrid.ready.then(() => {
-    const editor = new Ezygrid({ target: '#editor' });
-  }).catch(console.error);
-</script>
-```
+## Examples
 
-The loader fetches separate dependency files and enables declarative startup
-automatically. No consumer bundling step is required. Build the distribution
-from this repository with `pnpm build`.
-See [Getting started](docs/getting-started.md) for configuration, lifecycle, and dynamic hosts,
-and the [examples folder](examples/README.md) for runnable demos.
-
-## Status
-
-Phase 0 — architecture prototypes (monorepo, sparse store, viewport index, formula parser, reference transforms).
+Runnable demos in the [examples folder](examples/README.md) — served via any
+static server (e.g. WAMP: `http://localhost/ezygrid/examples/`).
 
 ## Development
 
@@ -62,12 +70,10 @@ pnpm build       # tsc project references build
 pnpm typecheck
 ```
 
-## Packages
+## Status
 
-- `@ezygrid/model` — coordinates, ranges, A1 utilities, stable IDs, operation format, sparse store, viewport size index, reference transforms.
-- `@ezygrid/formula` — Excel-compatible formula lexer/parser/AST, dependency graph, function library.
-- `@ezygrid/core` — workbook/worksheet facade, rendering, selection, editing, history (in progress).
+Early development — APIs are still stabilizing; treat it as non-production.
 
-## Clean-room policy
+## License
 
-Only publicly documented behavior of comparable products may be referenced. Do not copy proprietary source, assets, docs text or package structures.
+MIT
