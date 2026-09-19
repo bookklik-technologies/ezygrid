@@ -173,10 +173,11 @@ export function installSuiteTopbar(root: HTMLElement, bar: HTMLElement, parts: P
     if (focused && panel.contains(focused)) summary.focus();
     else if (more.hidden && focused === summary) parts.title.focus();
   };
-  const observer = new ResizeObserver(layout);
-  observer.observe(root);
+  const Observer = doc.defaultView?.ResizeObserver;
+  const observer = Observer ? new Observer(layout) : undefined;
+  observer?.observe(root);
   layout();
-  return () => { observer.disconnect(); cleanupMenu(); };
+  return () => { observer?.disconnect(); cleanupMenu(); };
 }
 
 /** Accessible transient menus used by the grid and design editor topbars. */

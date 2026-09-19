@@ -111,7 +111,7 @@ describe('full editor suite', () => {
 
   it('cleans up shell, dialogs, and listeners while allowing another mount', () => {
     const editor = mount(); const target = editor.target;
-    click(editor, 'Export'); expect(target.querySelector('dialog')).not.toBeNull();
+    click(editor, 'Export'); expect(target.querySelector('[role="menu"]')).not.toBeNull();
     editor.destroy(); expect(target.children).toHaveLength(0);
     const next = new Ezygrid({ target }); editors.push(next);
     expect(target.querySelectorAll('.ezygrid-suite')).toHaveLength(1);
