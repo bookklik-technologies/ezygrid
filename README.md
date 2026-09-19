@@ -5,7 +5,7 @@
 
 Framework-agnostic JavaScript/TypeScript spreadsheet and data-grid library by [Bookklik Technologies](https://github.com/bookklik-technologies).
 
-Clean-room project. See `ezygrid-devplan.md` for the full product and engineering specification.
+![Ezygrid preview](ezygrid-preview.png)
 
 ## Initialize a spreadsheet
 
