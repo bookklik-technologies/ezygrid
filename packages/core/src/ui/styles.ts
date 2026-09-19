@@ -40,6 +40,11 @@ export const editorStyles = `
 .ezygrid-suite .ezygrid-formulabar{border-bottom:1px solid var(--ezygrid-gridline,#e2e8f0)}
 .ezygrid-suite .ezygrid-formulabar input{min-height:0;padding:1px 8px;border-radius:0;border-top:0;border-bottom:0}
 .ezygrid-suite .ezygrid-contextmenu{border-radius:10px;padding:4px;min-width:180px!important;font:inherit}.ezygrid-contextmenu-item:hover{background:var(--ezygrid-selection-soft,#e6fff4)}
+.ezg-export-menu{position:absolute;z-index:900;display:flex;flex-direction:column;background:var(--ezygrid-bg,#fff);border:1px solid var(--ezygrid-gridline,#e2e8f0);box-shadow:0 8px 28px rgba(15,15,20,.13),0 2px 6px rgba(15,15,20,.05)}
+.ezygrid-suite .ezg-export-menu .ezygrid-contextmenu-item{padding:7px 12px;border-radius:6px;font-weight:500;white-space:nowrap}
+.ezg-export .ezg-chevron{display:flex}
+.ezg-export .ezg-chevron svg{width:14px;height:14px;transition:transform .15s ease}
+.ezg-export.ezg-menu-open .ezg-chevron svg{transform:rotate(180deg)}
 .ezygrid-suite [hidden]{display:none!important}
 @media(max-width:700px){.ezg-brand{font-size:0;margin:0}.ezg-title{width:110px!important}.ezg-topbar{gap:3px;padding:6px}.ezg-topbar .ezg-optional{display:none}.ezg-stats{display:none}.ezg-panel{position:absolute;inset-inline-end:0;top:0;bottom:0;width:min(300px,90%);z-index:20;box-shadow:-4px 0 20px #0001}.ezg-tabs button{padding:6px 9px}}
 `;

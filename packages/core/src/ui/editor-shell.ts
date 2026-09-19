@@ -1,7 +1,7 @@
 import { Workbook, type CellStyle } from '../workbook.js';
 import type { GridRenderer, GridRendererOptions } from '../renderer.js';
 import { rectToRange } from '@ezygrid/model';
-import { node, button, form, type Field, type Values } from './dom.js';
+import { node, button, icon, form, type Field, type Values } from './dom.js';
 import { installEditorStyles } from './styles.js';
 import { openPanel } from './panels.js';
 import { workbookFromXlsx, workbookToXlsx } from '../xlsx/index.js';
@@ -22,7 +22,6 @@ const commandIcons: Record<string, string> = {
   'file.csvImport': 'import',
   'file.csvExport': 'export',
   'file.xlsxExport': 'xlsx',
-  'file.export': 'export',
   'file.print': 'print',
   'clipboard.cut': 'cut',
   'clipboard.copy': 'copy',
@@ -102,6 +101,9 @@ export class EditorShell {
   private fileKind: 'document' | 'csv' = 'document';
   private sheetSignature = '';
   private formulaVisible: boolean;
+  private exportButton: HTMLButtonElement;
+  private exportMenu?: HTMLElement;
+  private exportDismiss?: (event: MouseEvent) => void;
 
   constructor(container: HTMLElement, grid: HTMLElement, readonly workbook: Workbook, readonly renderer: GridRenderer, options: Required<GridRendererOptions>) {
     this.doc = container.ownerDocument;
@@ -122,9 +124,14 @@ export class EditorShell {
     this.filename.addEventListener('change', () => this.mutate(() => { workbook.filename = this.filename.value.trim() || 'Untitled workbook'; }));
     top.append(brand, this.filename, this.commandButton('edit.undo'), this.commandButton('edit.redo'), node(this.doc, 'div', 'ezg-spacer'));
     for (const [id, icon] of [['file.open', 'open'], ['file.save', 'save'], ['view.fullscreen', 'expand']] as const) top.append(this.commandButton(id, icon));
-    const download = this.commandButton('file.export');
-    download.append(node(this.doc, 'span', '', 'Export'));
-    download.className = 'ezg-primary';
+    const chevron = node(this.doc, 'span', 'ezg-chevron');
+    chevron.append(icon(this.doc, 'chevronDown'));
+    const download = button(this.doc, 'Export', () => this.toggleExportMenu(), 'export');
+    download.classList.add('ezg-primary', 'ezg-export');
+    download.setAttribute('aria-haspopup', 'menu');
+    download.setAttribute('aria-expanded', 'false');
+    download.append(node(this.doc, 'span', '', 'Export'), chevron);
+    this.exportButton = download;
     top.append(download);
     this.tabBar = node(this.doc, 'div', 'ezg-tabs');
     this.tabBar.setAttribute('role', 'tablist');
@@ -236,9 +243,6 @@ export class EditorShell {
     register('file.csvImport', 'Import CSV', () => this.chooseFile('csv'));
     register('file.csvExport', 'Export CSV', () => this.download(this.sheet.toCsv(), 'csv', 'text/csv'));
     register('file.xlsxExport', 'Export Excel', () => this.download(workbookToXlsx(this.workbook), 'xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'));
-    register('file.export', 'Export', () => this.dialog('Export workbook', [
-      { key: 'format', label: 'File format', options: ['Excel (.xlsx)', 'CSV — active sheet', 'Ezygrid JSON'], value: 'Excel (.xlsx)' },
-    ], (v) => this.execute(v.format!.startsWith('Excel') ? 'file.xlsxExport' : v.format!.startsWith('CSV') ? 'file.csvExport' : 'file.save'), 'Download'));
     register('file.print', 'Print', () => this.dialog('Print active worksheet', [
       { key: 'paper', label: 'Paper', options: ['A4', 'Letter'], value: 'A4' },
       { key: 'orientation', label: 'Orientation', options: ['portrait', 'landscape'], value: 'portrait' },
@@ -399,6 +403,71 @@ export class EditorShell {
 
   confirm(title: string, apply: () => void): void { this.dialog(title, [], apply, 'Continue'); }
 
+  private toggleExportMenu(): void {
+    if (this.exportMenu) this.closeExportMenu();
+    else this.showExportMenu();
+  }
+
+  private showExportMenu(): void {
+    this.closeExportMenu();
+    this.exportButton.classList.add('ezg-menu-open');
+    this.exportButton.setAttribute('aria-expanded', 'true');
+    const menu = node(this.doc, 'div', 'ezygrid-contextmenu ezg-export-menu');
+    menu.setAttribute('role', 'menu');
+    menu.setAttribute('aria-label', 'Export workbook');
+    const items: { label: string; run: () => void }[] = [
+      { label: 'Excel (.xlsx)', run: () => this.execute('file.xlsxExport') },
+      { label: 'CSV (active sheet)', run: () => this.execute('file.csvExport') },
+      { label: 'Ezygrid JSON', run: () => this.execute('file.save') },
+    ];
+    for (const item of items) {
+      const row = node(this.doc, 'div', 'ezygrid-contextmenu-item', item.label);
+      row.setAttribute('role', 'menuitem');
+      row.tabIndex = 0;
+      row.addEventListener('click', () => {
+        this.closeExportMenu();
+        item.run();
+      });
+      menu.append(row);
+    }
+    menu.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); this.closeExportMenu(); this.renderer.focus(); }
+      else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const target = event.target as HTMLElement;
+        const next = event.key === 'ArrowDown' ? target.nextElementSibling ?? menu.firstElementChild : target.previousElementSibling ?? menu.lastElementChild;
+        (next as HTMLElement)?.focus();
+      }
+      event.stopPropagation();
+    });
+    const buttonRect = this.exportButton.getBoundingClientRect();
+    const rootRect = this.root.getBoundingClientRect();
+    if (this.root.dir === 'rtl') menu.style.left = `${buttonRect.left - rootRect.left}px`;
+    else menu.style.right = `${Math.max(0, rootRect.right - buttonRect.right)}px`;
+    menu.style.top = `${buttonRect.bottom - rootRect.top + 4}px`;
+    this.exportMenu = menu;
+    this.exportDismiss = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (this.exportButton.contains(target) || menu.contains(target)) return;
+      this.closeExportMenu();
+    };
+    this.doc.addEventListener('mousedown', this.exportDismiss, true);
+    this.root.append(menu);
+    (menu.firstElementChild as HTMLElement)?.focus();
+  }
+
+  private closeExportMenu(): void {
+    if (!this.exportMenu) return;
+    this.exportMenu.remove();
+    this.exportMenu = undefined;
+    this.exportButton.classList.remove('ezg-menu-open');
+    this.exportButton.setAttribute('aria-expanded', 'false');
+    if (this.exportDismiss) {
+      this.doc.removeEventListener('mousedown', this.exportDismiss, true);
+      this.exportDismiss = undefined;
+    }
+  }
+
   message(error: unknown): void {
     if (this.disposed) return;
     this.status?.remove();
@@ -458,6 +527,7 @@ export class EditorShell {
   destroy(): void {
     this.disposed = true;
     this.unlisten();
+    this.closeExportMenu();
     this.root.removeEventListener('keydown', this.onKeyDown);
     this.root.remove();
   }

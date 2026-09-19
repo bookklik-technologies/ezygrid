@@ -61,25 +61,29 @@ const icons: Record<string, string> = {
   import: '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M12 12v6"/><path d="m15 15-3-3-3 3"/>',
   xlsx: '<path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"/><path d="M14 2v5a1 1 0 0 0 1 1h5"/><path d="M8 18v-1"/><path d="M12 18v-6"/><path d="M16 18v-3"/>',
   theme: '<path d="M12 2v2"/><path d="M14.837 16.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715"/><path d="M16 12a4 4 0 0 0-4-4"/><path d="m19 5-1.256 1.256"/><path d="M20 12h2"/>',
+  chevronDown: '<path d="m6 9 6 6 6-6"/>',
 };
 
-export function button(doc: Document, label: string, action: () => void, icon?: string): HTMLButtonElement {
+export function icon(doc: Document, name: string): SVGSVGElement {
+  const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('viewBox', '0 0 24 24');
+  svg.setAttribute('fill', 'none');
+  svg.setAttribute('stroke', 'currentColor');
+  svg.setAttribute('stroke-width', '1.8');
+  svg.setAttribute('stroke-linecap', 'round');
+  svg.setAttribute('stroke-linejoin', 'round');
+  svg.setAttribute('aria-hidden', 'true');
+  svg.innerHTML = icons[name] ?? '';
+  return svg;
+}
+
+export function button(doc: Document, label: string, action: () => void, iconName?: string): HTMLButtonElement {
   const element = node(doc, 'button');
   element.type = 'button';
   element.title = label;
   element.setAttribute('aria-label', label);
-  if (icon && icons[icon]) {
-    const svg = doc.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.setAttribute('viewBox', '0 0 24 24');
-    svg.setAttribute('fill', 'none');
-    svg.setAttribute('stroke', 'currentColor');
-    svg.setAttribute('stroke-width', '1.8');
-    svg.setAttribute('stroke-linecap', 'round');
-    svg.setAttribute('stroke-linejoin', 'round');
-    svg.setAttribute('aria-hidden', 'true');
-    svg.innerHTML = icons[icon]!;
-    element.append(svg);
-  } else element.textContent = label;
+  if (iconName && icons[iconName]) element.append(icon(doc, iconName));
+  else element.textContent = label;
   element.addEventListener('click', action);
   return element;
 }
