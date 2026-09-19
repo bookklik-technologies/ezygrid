@@ -4,12 +4,12 @@
 .ezygrid, .ezygrid-suite {
   --ezygrid-font-family: Outfit, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
   --ezygrid-font-size: 13px;
-  --ezygrid-bg: #0f172a;
-  --ezygrid-text: #e2e8f0;
-  --ezygrid-gridline: #1e293b;
+  --ezygrid-bg: #17181d;
+  --ezygrid-text: #e8e9ee;
+  --ezygrid-gridline: #383a41;
   --ezygrid-selection: #00ff99;
   --ezygrid-selection-soft: rgba(0, 255, 153, 0.16);
-  --ezygrid-header-bg: #16223a;
-  --ezygrid-header-text: #94a3b8;
+  --ezygrid-header-bg: #23252b;
+  --ezygrid-header-text: #9a9da8;
   --ezygrid-table-band: rgba(0, 255, 153, 0.06);
 }

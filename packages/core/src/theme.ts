@@ -50,13 +50,14 @@ export function buildThemeCss(overrides: Partial<ThemeTokens> = {}): string {
 }
 
 export const darkThemeTokens: Partial<ThemeTokens> = {
-  bg: '#0f172a',
-  text: '#e2e8f0',
-  gridline: '#1e293b',
+  // Neutral base matches Ezyreka; selection retains Ezygrid's brand accent.
+  bg: '#17181d',
+  text: '#e8e9ee',
+  gridline: '#383a41',
   selection: '#00ff99',
   selectionSoft: 'rgba(0, 255, 153, 0.16)',
-  headerBg: '#16223a',
-  headerText: '#94a3b8',
+  headerBg: '#23252b',
+  headerText: '#9a9da8',
   tableBand: 'rgba(0, 255, 153, 0.06)',
 };
 
