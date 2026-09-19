@@ -89,6 +89,7 @@ export class EditorShell {
   readonly root: HTMLElement;
   private main: HTMLElement;
   private ribbon: HTMLElement;
+  private ribbonToggle: HTMLButtonElement;
   private tabBar: HTMLElement;
   private tabs: HTMLElement;
   private stats: HTMLElement;
@@ -180,7 +181,7 @@ export class EditorShell {
     this.ribbon.setAttribute('aria-label', 'Spreadsheet tools');
     this.ribbon.hidden = !options.toolbar;
     for (const title of Object.keys(ribbons)) {
-      const tab = button(this.doc, title, () => { this.ribbon.hidden = false; this.selectTab(title); });
+      const tab = button(this.doc, title, () => { this.setRibbonVisible(true); this.selectTab(title); });
       tab.setAttribute('role', 'tab');
       tab.addEventListener('keydown', (event) => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -193,7 +194,9 @@ export class EditorShell {
       });
       this.tabBar.append(tab);
     }
-    this.tabBar.append(button(this.doc, 'Collapse ribbon', () => { this.ribbon.hidden = !this.ribbon.hidden; }, 'collapse'));
+    this.ribbonToggle = button(this.doc, 'Collapse ribbon', () => this.setRibbonVisible(this.ribbon.hidden), 'collapse');
+    this.setRibbonVisible(options.toolbar);
+    this.tabBar.append(this.ribbonToggle);
     this.main = node(this.doc, 'div', 'ezg-main');
     const viewport = node(this.doc, 'div', 'ezg-viewport');
     viewport.append(grid);
@@ -307,7 +310,7 @@ export class EditorShell {
     register('formula.recalculate', 'Recalculate', () => { this.workbook.refreshFormulaGraph(); this.renderer.render(); });
     register('notes.clear', 'Remove note', () => this.mutate(() => this.sheet.clearNote(this.range)));
     register('view.formula', 'Formula bar', () => { this.formulaVisible = !this.formulaVisible; this.renderer.setFormulaBarVisible(this.formulaVisible); });
-    register('view.ribbon', 'Collapse ribbon', () => { this.ribbon.hidden = !this.ribbon.hidden; });
+    register('view.ribbon', 'Collapse ribbon', () => this.setRibbonVisible(this.ribbon.hidden));
     register('view.theme', 'Light / dark', () => {
       this.setThemeChoice(this.root.dataset.theme === 'dark' ? 'light' : 'dark');
     });
@@ -367,6 +370,15 @@ export class EditorShell {
     this.fullscreenButton.replaceChildren(icon(this.doc, active ? 'shrink' : 'expand'));
     this.fullscreenButton.title = active ? 'Exit fullscreen' : 'Enter fullscreen';
     this.fullscreenButton.setAttribute('aria-label', this.fullscreenButton.title);
+  }
+
+  private setRibbonVisible(visible: boolean): void {
+    this.ribbon.hidden = !visible;
+    const label = visible ? 'Collapse ribbon' : 'Expand ribbon';
+    this.ribbonToggle.replaceChildren(icon(this.doc, visible ? 'collapse' : 'chevronDown'));
+    this.ribbonToggle.title = label;
+    this.ribbonToggle.setAttribute('aria-label', label);
+    this.ribbonToggle.setAttribute('aria-expanded', String(visible));
   }
 
   private selectTab(title: string): void {
