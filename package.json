@@ -1,5 +1,5 @@
 {
-  "name": "ezygrid",
+  "name": "@bookklik/ezygrid",
   "private": true,
   "version": "0.1.1",
   "description": "Framework-agnostic JavaScript/TypeScript spreadsheet and data-grid library.",
@@ -15,7 +15,7 @@
   ],
   "license": "MIT",
   "author": {
-    "name": "Bookklik Technologies",
+    "name": "a-hakim",
     "url": "https://github.com/bookklik-technologies"
   },
   "repository": {
