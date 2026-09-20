@@ -28,27 +28,37 @@
   "exports": {
     "./xlsx/*": {
       "types": "./dist/xlsx/*.d.ts",
-      "import": "./dist/xlsx/*.js"
+      "import": "./dist/xlsx/*.js",
+      "require": "./dist/cjs/xlsx/*.js"
     },
     "./xlsx": {
       "types": "./dist/xlsx/index.d.ts",
-      "import": "./dist/xlsx/index.js"
+      "import": "./dist/xlsx/index.js",
+      "require": "./dist/cjs/xlsx/index.js"
     },
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/cjs/index.js"
     },
     "./auto": {
       "types": "./dist/auto.d.ts",
-      "import": "./dist/auto.js"
+      "import": "./dist/auto.js",
+      "require": "./dist/cjs/auto.js"
     },
     "./browser": {
       "types": "./dist/browser.d.ts",
       "default": "./dist/browser/ezygrid.js"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && node ../../scripts/build-browser.mjs"
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node ../../scripts/write-cjs-package.mjs dist/cjs && node ../../scripts/build-browser.mjs"
   },
   "dependencies": {
     "@ezygrid/model": "workspace:*",

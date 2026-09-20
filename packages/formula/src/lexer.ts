@@ -64,6 +64,7 @@ export function tokenize(input: string): Token[] {
     if (ch === '"') {
       let j = i + 1;
       let out = '';
+      let terminated = false;
       while (j < n) {
         if (input[j] === '"') {
           if (input[j + 1] === '"') {
@@ -71,6 +72,7 @@ export function tokenize(input: string): Token[] {
             j += 2;
           } else {
             j += 1;
+            terminated = true;
             break;
           }
         } else {
@@ -78,6 +80,9 @@ export function tokenize(input: string): Token[] {
           j += 1;
         }
       }
+      // An unterminated literal is a syntax error (L8), not a string that
+      // silently consumes the rest of the expression to EOF.
+      if (!terminated) throw new Error(`unterminated string literal starting at position ${i}`);
       tokens.push({ type: 'string', text: input.slice(i, j), value: out });
       i = j;
       continue;

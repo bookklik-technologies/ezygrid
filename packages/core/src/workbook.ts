@@ -91,8 +91,42 @@ export const DEFAULT_COLUMN_WIDTH = 100;
 export class Worksheet {
   readonly id: string;
   workbook: Workbook;
-  freezeRows = 0;
-  freezeColumns = 0;
+
+  /** Frozen leading rows (0 = none); assigning repaints via a view marker. */
+  get freezeRows(): number {
+    return this.freezeRows_;
+  }
+
+  set freezeRows(value: number) {
+    const next = Math.max(0, Math.min(this.rowCount, Number(value) || 0));
+    if (next === this.freezeRows_) return;
+    this.freezeRows_ = next;
+    this.emitViewMarker('freeze');
+  }
+
+  /** Frozen leading columns (0 = none); assigning repaints via a view marker. */
+  get freezeColumns(): number {
+    return this.freezeColumns_;
+  }
+
+  set freezeColumns(value: number) {
+    const next = Math.max(0, Math.min(this.columnCount, Number(value) || 0));
+    if (next === this.freezeColumns_) return;
+    this.freezeColumns_ = next;
+    this.emitViewMarker('freeze');
+  }
+
+  /**
+   * Repaint marker for mutations that carry no history record: listeners
+   * (the attached renderer) repaint, but the operation is emitted without
+   * an inverse so undo history is not polluted (F08).
+   */
+  private emitViewMarker(what: string): void {
+    this.workbook.emitOperation(op(this.workbook.id, 'view.update', { what }, this.id));
+  }
+
+  private freezeRows_ = 0;
+  private freezeColumns_ = 0;
   readonly pivotSpecs: import('./pivot.js').PivotSpec[] = [];
   readonly filterCriteria = new Map<number, FilterCriteria>();
   readonly cells = new SparseCellStore();
@@ -154,22 +188,29 @@ export class Worksheet {
   // ── Charts / pivot / media convenience APIs ──────────────────────────────
 
   addChart(spec: Parameters<ChartEngine['add']>[0]): string {
-    return this.charts.add(spec).id;
+    const id = this.charts.add(spec).id;
+    this.emitViewMarker('chart');
+    return id;
   }
 
   addPivot(spec: Omit<import('./pivot.js').PivotSpec, 'id'>): string {
     const full = { ...spec, id: createId('pivot') };
     this.pivots.refresh(this, full);
     this.pivotSpecs.push(full);
+    this.emitViewMarker('pivot');
     return full.id;
   }
 
   addImage(image: Parameters<MediaStore['addImage']>[0]): string {
-    return this.media.addImage(image).id;
+    const id = this.media.addImage(image).id;
+    this.emitViewMarker('image');
+    return id;
   }
 
   addShape(shape: Parameters<MediaStore['addShape']>[0]): string {
-    return this.media.addShape(shape).id;
+    const id = this.media.addShape(shape).id;
+    this.emitViewMarker('shape');
+    return id;
   }
 
   // ── CSV import/export (§35.1) ────────────────────────────────────────────
@@ -242,19 +283,41 @@ export class Worksheet {
   readonly hiddenColumns = new Set<number>();
 
   hideRows(index: number, count = 1): void {
-    for (let i = 0; i < count; i++) this.hiddenRows.add(index + i);
+    let changed = false;
+    for (let i = 0; i < count; i++) {
+      if (!this.hiddenRows.has(index + i)) {
+        this.hiddenRows.add(index + i);
+        changed = true;
+      }
+    }
+    if (changed) this.emitViewMarker('visibility');
   }
 
   showRows(index: number, count = 1): void {
-    for (let i = 0; i < count; i++) this.hiddenRows.delete(index + i);
+    let changed = false;
+    for (let i = 0; i < count; i++) {
+      if (this.hiddenRows.delete(index + i)) changed = true;
+    }
+    if (changed) this.emitViewMarker('visibility');
   }
 
   hideColumns(index: number, count = 1): void {
-    for (let i = 0; i < count; i++) this.hiddenColumns.add(index + i);
+    let changed = false;
+    for (let i = 0; i < count; i++) {
+      if (!this.hiddenColumns.has(index + i)) {
+        this.hiddenColumns.add(index + i);
+        changed = true;
+      }
+    }
+    if (changed) this.emitViewMarker('visibility');
   }
 
   showColumns(index: number, count = 1): void {
-    for (let i = 0; i < count; i++) this.hiddenColumns.delete(index + i);
+    let changed = false;
+    for (let i = 0; i < count; i++) {
+      if (this.hiddenColumns.delete(index + i)) changed = true;
+    }
+    if (changed) this.emitViewMarker('visibility');
   }
 
   isColumnHidden(column: number): boolean {
@@ -271,6 +334,7 @@ export class Worksheet {
     this.filterCriteria.delete(column);
     this.filters.set(column, predicate);
     this.applyFilters();
+    this.emitViewMarker('filter');
   }
 
   clearFilter(column?: number): void {
@@ -279,6 +343,7 @@ export class Worksheet {
     if (column === undefined) this.filters.clear();
     else this.filters.delete(column);
     this.applyFilters();
+    this.emitViewMarker('filter');
   }
 
   setFilterCriteria(column: number, criteria: FilterCriteria): void {
@@ -394,12 +459,16 @@ export class Worksheet {
    * Apply a metadata mutation across a range with a reversible history
    * record: forward op carries the new per-cell values, inverse carries
    * the previous ones (F08). Unchanged cells are omitted from both.
+   * Ranges are clamped to the sheet dimensions (M2): parsed A1 ranges are
+   * unbounded, and iterating `A1:ZZZ9999999` raw would hang the tab.
    */
   private recordMetaChange(rect: Rect, mutate: (row: number, column: number) => void): void {
+    const clamped = this.clampRect(rect);
+    if (!clamped) return;
     const before: MetaCellSnapshot[] = [];
     const after: MetaCellSnapshot[] = [];
-    for (let r = rect.top; r <= rect.bottom; r++) {
-      for (let c = rect.left; c <= rect.right; c++) {
+    for (let r = clamped.top; r <= clamped.bottom; r++) {
+      for (let c = clamped.left; c <= clamped.right; c++) {
         const beforeSnap = this.metaSnapshotFor(r, c);
         mutate(r, c);
         const afterSnap = this.metaSnapshotFor(r, c);
@@ -429,12 +498,23 @@ export class Worksheet {
     };
   }
 
+  /** Clamp a parsed rect to the sheet dimensions; null when entirely outside (M2). */
+  private clampRect(rect: Rect): Rect | null {
+    const top = Math.max(0, rect.top);
+    const left = Math.max(0, rect.left);
+    const bottom = Math.min(this.rowCount - 1, rect.bottom);
+    const right = Math.min(this.columnCount - 1, rect.right);
+    if (top > bottom || left > right) return null;
+    return { top, left, bottom, right };
+  }
+
   // ── Nested headers (§17.2): multi-level column header groups ────────────
 
   private nestedHeadersConfig: (string | { title: string; span: number })[][] = [];
 
   setNestedHeaders(levels: (string | { title: string; span: number })[][]): void {
     this.nestedHeadersConfig = levels;
+    this.emitViewMarker('nested-headers');
   }
 
   get nestedHeaders(): readonly (readonly (string | { title: string; span: number })[])[] {
@@ -449,6 +529,7 @@ export class Worksheet {
   groupRows(start: number, end: number): void {
     if (end <= start) return;
     this.rowGroupsConfig.push({ start, end, collapsed: false });
+    this.emitViewMarker('group');
   }
 
   ungroupRows(start: number): void {
@@ -456,6 +537,7 @@ export class Worksheet {
     if (!group) return;
     if (group.collapsed) this.expandGroup(start);
     this.rowGroupsConfig = this.rowGroupsConfig.filter((g) => g.start !== start);
+    this.emitViewMarker('group');
   }
 
   collapseGroup(start: number): void {
@@ -463,6 +545,7 @@ export class Worksheet {
     if (!group || group.collapsed) return;
     group.collapsed = true;
     for (let r = group.start; r <= group.end; r++) this.groupHiddenRows.add(r);
+    this.emitViewMarker('group');
   }
 
   expandGroup(start: number): void {
@@ -470,6 +553,7 @@ export class Worksheet {
     if (!group || !group.collapsed) return;
     group.collapsed = false;
     for (let r = group.start; r <= group.end; r++) this.groupHiddenRows.delete(r);
+    this.emitViewMarker('group');
   }
 
   getGroups(): readonly { start: number; end: number; collapsed: boolean }[] {
@@ -515,6 +599,16 @@ export class Worksheet {
   }
 
   private load2DArray(data: unknown[][]): void {
+    // Data beyond the declared dimensions stays stored but is invisible (L9):
+    // surface the mismatch so callers know to raise rows/columns.
+    const dataRows = data.length;
+    const dataColumns = data.reduce((max, row) => Math.max(max, row?.length ?? 0), 0);
+    if (dataRows > this.rowCount || dataColumns > this.columnCount) {
+      console.warn(
+        `ezygrid: config.data exceeds sheet dimensions (${dataRows}x${dataColumns} > ` +
+          `${this.rowCount}x${this.columnCount}); overflow rows/columns are stored but not visible.`,
+      );
+    }
     for (let r = 0; r < data.length; r++) {
       const row = data[r]!;
       for (let c = 0; c < row.length; c++) {
@@ -1111,6 +1205,8 @@ export class Workbook {
   readonly definedNames = new Map<string, DefinedNameDefinition>();
   readonly pluginManager: PluginManager;
   private listeners = new Set<(op: Operation) => void>();
+  /** Monotonic mutation counter; caches (e.g. conditional-format scans) key on it. */
+  revision = 0;
   /** Update-transaction state for batched notifications (F02). */
   private updateDepth = 0;
   private suppressedOps = 0;
@@ -1261,16 +1357,23 @@ export class Workbook {
     });
   }
 
-  /** One reversible editor action, including feature metadata; failures roll back. */
+  /**
+   * One reversible editor action, including feature metadata; failures roll
+   * back. Reversible operations emitted by the action are coalesced into a
+   * single history entry (undo reverts the whole action) instead of storing
+   * two full-document snapshots per action (H1). A full-document snapshot
+   * pair is only used when the action contains mutations history cannot
+   * reverse, and for rollback when the action throws.
+   */
   transaction(action: () => void): void {
     if (this.transactionDepth > 0) { action(); return; }
     const before = this.captureDocument();
     this.transactionDepth++;
+    this.transactionOps = [];
     this.beginUpdate();
     try {
       action();
-      const after = this.captureDocument();
-      this.history.push(op(this.id, 'document.restore', after), op(this.id, 'document.restore', before));
+      this.recordTransactionOps(before);
       this.suppressedOps++;
     } catch (error) {
       this.restoreDocument(before);
@@ -1279,7 +1382,31 @@ export class Workbook {
       throw error;
     } finally {
       this.transactionDepth--;
+      this.transactionOps = [];
       this.endUpdate();
+    }
+  }
+
+  /**
+   * History record of the in-flight transaction (H1): every reversible op
+   * the action emitted with its inverse. Falls back to document snapshots
+   * when any recorded op is not reversible.
+   */
+  private transactionOps: { operation: Operation; inverse?: Operation[] }[] = [];
+
+  private recordTransactionOps(before: Record<string, unknown>): void {
+    if (this.transactionOps.length === 0 || !this.transactionOps.every((entry) => entry.inverse)) {
+      const after = this.captureDocument();
+      this.history.push(op(this.id, 'document.restore', after), op(this.id, 'document.restore', before));
+      return;
+    }
+    this.history.beginBatch();
+    try {
+      for (const entry of this.transactionOps) {
+        this.history.push(entry.operation, entry.inverse);
+      }
+    } finally {
+      this.history.endBatch();
     }
   }
 
@@ -1414,7 +1541,14 @@ export class Workbook {
   }
 
   emitOperation(operation: Operation, inverse?: Operation[]): void {
-    if (!this.transactionDepth) this.recordWithInverse(operation, inverse);
+    this.revision += 1;
+    if (this.transactionDepth > 0) {
+      // The transaction records (op, inverse) pairs and coalesces them into
+      // one history entry at commit time (H1).
+      this.transactionOps.push({ operation, inverse: this.inverseFor(operation, inverse) });
+    } else {
+      this.recordWithInverse(operation, inverse);
+    }
     // Inside an update transaction listeners get one aggregated event (F02).
     if (this.updateDepth > 0) {
       this.suppressedOps += 1;
@@ -1424,7 +1558,8 @@ export class Workbook {
     for (const listener of this.listeners) listener(operation);
   }
 
-  private recordWithInverse(operation: Operation, providedInverse?: Operation[]): void {
+  /** Reversible ops enter history; inverse computation shared with transaction coalescing. */
+  private inverseFor(operation: Operation, providedInverse?: Operation[]): Operation[] | undefined {
     let inverse = providedInverse;
     if (!inverse && operation.type === 'cell.set') {
       const payload = operation.payload as import('@ezygrid/model').SetCellPayload;
@@ -1448,7 +1583,12 @@ export class Workbook {
     }
     // Only reversible operations enter history; a missing inverse would
     // otherwise produce an undo that restores nothing (F08).
-    if (inverse && inverse.length > 0) {
+    return inverse && inverse.length > 0 ? inverse : undefined;
+  }
+
+  private recordWithInverse(operation: Operation, providedInverse?: Operation[]): void {
+    const inverse = this.inverseFor(operation, providedInverse);
+    if (inverse) {
       this.history.push(operation, inverse);
     }
   }
@@ -1723,6 +1863,12 @@ export class Workbook {
       for (const operation of entry.inverse) {
         this.applyHistoryOperation(operation);
       }
+    } catch (error) {
+      // A failed replay must not strand the entry on the redo stack with a
+      // half-restored workbook (L10): put it back so the state stays
+      // consistent and the user can retry or continue editing.
+      this.history.restoreUndo(entry);
+      throw error;
     } finally {
       this.history.setTransformExclusion(null);
     }
@@ -1737,6 +1883,9 @@ export class Workbook {
       for (const operation of entry.forward) {
         this.applyHistoryOperation(operation);
       }
+    } catch (error) {
+      this.history.restoreRedo(entry);
+      throw error;
     } finally {
       this.history.setTransformExclusion(null);
     }
@@ -1984,7 +2133,12 @@ export class Workbook {
       }
       for (const object of Array.isArray(raw?.media) ? raw.media : []) {
         if (object && typeof object === 'object' && object.kind === 'image') {
-          sheet.addImage(object);
+          try {
+            sheet.addImage(object);
+          } catch {
+            // Documents from older versions may carry non-allowlisted image
+            // sources (L2): skip them instead of failing the whole load.
+          }
         } else if (object && typeof object === 'object') {
           sheet.addShape(object);
         }

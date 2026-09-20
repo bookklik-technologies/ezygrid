@@ -29,10 +29,17 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/cjs/index.js"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node ../../scripts/write-cjs-package.mjs dist/cjs"
   }
 }

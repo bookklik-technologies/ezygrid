@@ -25,6 +25,14 @@
   "type": "module",
   "main": "./index.css",
   "exports": {
-    ".": "./index.css"
-  }
+    ".": {
+      "default": "./index.css"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "index.css"
+  ]
 }

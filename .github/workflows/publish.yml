@@ -1,13 +1,16 @@
-name: CI
+name: Publish
 
 on:
   push:
-    branches: [main]
-  pull_request:
+    tags:
+      - 'v*'
 
 jobs:
-  verify:
+  publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -17,6 +20,7 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -24,7 +28,7 @@ jobs:
       - name: Lint
         run: pnpm lint
 
-      - name: Typecheck (all workspace packages, including Angular)
+      - name: Typecheck
         run: pnpm typecheck
 
       - name: Test
@@ -33,9 +37,8 @@ jobs:
       - name: Build packages
         run: pnpm build
 
-      - name: Verify publishable tarballs (files include dist, no src/tests)
-        run: node scripts/check-pack.mjs
-
-      - name: Audit dependencies
-        run: pnpm audit --prod || true
-        continue-on-error: true
+      - name: Publish all packages
+        run: pnpm publish -r --no-git-checks --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: true

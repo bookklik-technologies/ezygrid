@@ -61,6 +61,9 @@ export class EzyGridComponent implements AfterViewInit, OnChanges, OnDestroy {
   ngOnDestroy(): void {
     this.rendererInstance?.destroy();
     this.rendererInstance = undefined;
+    // Release the model so consumer-held component refs do not keep the
+    // whole workbook graph (and its plugin attachments) alive (M9).
+    this.workbookInstance = undefined;
   }
 
   private rebuild(): void {

@@ -1,7 +1,10 @@
 import { suiteTopbarStyles } from './suite-topbar-styles.js';
 
+// The Outfit font is OPTIONAL (L3): the suite renders with the system
+// fallback stack by default, so no third-party network request is made
+// (CSP-safe, offline-safe). Hosts that want Outfit load it themselves, e.g.
+// <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap">
 export const editorStyles = `
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap');
 .ezygrid-suite{--ezg-surface:#f7f9fb;--ezg-muted:#64748b;position:relative;display:flex;flex-direction:column;width:100%;height:100%;min-height:220px;overflow:hidden;box-sizing:border-box;border:1px solid var(--ezygrid-gridline,#e2e8f0);border-radius:0px;background:var(--ezygrid-bg,#fff);color:var(--ezygrid-text,#0f172a);font:13px Outfit,-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,Roboto,'Helvetica Neue',sans-serif;isolation:isolate}
 .ezygrid-suite[data-theme=dark]{--ezg-surface:#23252b;--ezg-muted:#9a9da8;--ezygrid-bg:#17181d;--ezygrid-text:#e8e9ee;--ezygrid-gridline:#383a41;--ezygrid-header-bg:#23252b;--ezygrid-header-text:#9a9da8;--ezygrid-selection:#00ff99;--ezygrid-selection-soft:rgba(0,255,153,.16);color-scheme:dark}
 .ezygrid-suite *{box-sizing:border-box}

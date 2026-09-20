@@ -23,6 +23,12 @@
     "ezygrid"
   ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "ng-packagr -p ng-package.json"
   },
@@ -30,12 +36,12 @@
     "@angular/common": ">=17",
     "@angular/core": ">=17"
   },
-  "devDependencies": {
-    "ng-packagr": "22.1.1",
-    "typescript": "6.0.2"
-  },
   "dependencies": {
     "@ezygrid/core": "workspace:*",
     "tslib": "2.8.1"
+  },
+  "devDependencies": {
+    "ng-packagr": "22.1.1",
+    "typescript": "6.0.2"
   }
 }

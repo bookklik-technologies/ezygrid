@@ -14,6 +14,9 @@ export function formatValue(value: unknown, mask?: string): string {
     return typeof value === 'number' ? stripFloatNoise(value) : String(value);
   }
   if (typeof value === 'number' && isDateMask(mask)) return formatSerialDate(value, mask);
+  // Booleans keep their text form (L6): TRUE with a numeric mask must not
+  // render as "1.00" the way Number(true) would coerce it.
+  if (typeof value === 'boolean') return String(value);
 
   if (typeof value !== 'number') {
     const n = Number(value);
@@ -36,7 +39,11 @@ function isDateMask(mask: string): boolean {
 }
 
 function formatSerialDate(serial: number, mask: string): string {
-  const ms = Math.round((serial - 25569) * 86400000);
+  // Excel's fake 1900-02-29 shifts the serial->epoch mapping (L6): serials
+  // 1..59 are one day behind the 25569 offset used for serial >= 61, and
+  // serial 60 (the phantom leap day) displays as 1900-02-28.
+  const epoch = serial < 60 ? 25568 : 25569;
+  const ms = Math.round((serial - epoch) * 86400000);
   const d = new Date(ms);
   const yyyy = String(d.getUTCFullYear()).padStart(4, '0');
   const mm = String(d.getUTCMonth() + 1).padStart(2, '0');

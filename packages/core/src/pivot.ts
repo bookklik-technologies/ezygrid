@@ -71,7 +71,9 @@ export class PivotEngine {
         row.push(records[0]?.[groupCol] ?? null);
       }
       for (const valueField of valueCols) {
-        const valueIndex = valueFieldSourceIndex(valueField, rect, spec);
+        // values[].column is relative to the source range's left edge,
+        // matching the record layout (index 0 = rect.left).
+        const valueIndex = valueField.column;
         const nums: number[] = [];
         for (const record of records) {
           const v = record[valueIndex];
@@ -87,7 +89,7 @@ export class PivotEngine {
       const nums: number[] = [];
       for (const record of groups.values()) {
         for (const record2 of record) {
-          const v = record2[valueFieldSourceIndex(valueField, rect, spec)];
+          const v = record2[valueField.column];
           if (typeof v === 'number') nums.push(v);
         }
       }
@@ -109,13 +111,6 @@ export class PivotEngine {
       }
     }
   }
-}
-
-function valueFieldSourceIndex(field: PivotValueField, rect: { left: number }, spec: PivotSpec): number {
-  void rect;
-  void spec;
-  // valueField.column is relative to the source range's left edge.
-  return field.column;
 }
 
 /** Convenience: build a pivot spec id. */

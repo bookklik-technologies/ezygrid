@@ -36,6 +36,12 @@ export interface ConditionalFormatRule {
  */
 export class ConditionalFormatEngine {
   private rules: ConditionalFormatRule[] = [];
+  /**
+   * Range-scan memo for topN/duplicates (H4): applyCellStyle runs for every
+   * visible cell on every render pass, so a rule's range is scanned once per
+   * workbook revision instead of once per painted cell. Keys are rule ids.
+   */
+  private scans = new Map<string, { revision: number; data: unknown }>();
 
   add(rule: Omit<ConditionalFormatRule, 'id'>): ConditionalFormatRule {
     const full: ConditionalFormatRule = { ...rule, id: (rule as Partial<ConditionalFormatRule>).id ?? createId('cf') };
@@ -45,6 +51,7 @@ export class ConditionalFormatEngine {
 
   remove(id: string): void {
     this.rules = this.rules.filter((r) => r.id !== id);
+    this.scans.delete(id);
   }
 
   all(): readonly ConditionalFormatRule[] {
@@ -93,22 +100,49 @@ export class ConditionalFormatEngine {
         return rule.predicate ? rule.predicate(value) : false;
       case 'topN': {
         const n = rule.n ?? 10;
-        const nums = this.rangeNumbers(rule.range, worksheet);
-        const threshold = nums.sort((a, b) => b - a)[Math.min(n, nums.length) - 1];
+        const threshold = this.cachedScan(rule, worksheet, () => {
+          const nums = this.rangeNumbers(rule.range, worksheet);
+          return nums.sort((a, b) => b - a)[Math.min(n, nums.length) - 1];
+        }) as number | undefined;
         return typeof value === 'number' && value >= (threshold ?? Infinity);
       }
       case 'duplicates': {
-        const nums = this.rangeValues(rule.range, worksheet);
+        const duplicated = this.cachedScan(rule, worksheet, () => {
+          const counts = new Map<string, number>();
+          for (const v of this.rangeValues(rule.range, worksheet)) {
+            const key = String(v);
+            counts.set(key, (counts.get(key) ?? 0) + 1);
+          }
+          const out = new Set<string>();
+          for (const [key, count] of counts) if (count > 1) out.add(key);
+          return out;
+        }) as Set<string>;
         const key = String(value);
-        return key !== 'null' && nums.filter((v) => String(v) === key).length > 1;
+        return key !== 'null' && duplicated.has(key);
       }
       default:
         return false;
     }
   }
 
+  /** Range-scan memo keyed by rule id (+ rule-specific params), valid for one workbook revision. */
+  private cachedScan(
+    rule: ConditionalFormatRule,
+    worksheet: Worksheet,
+    compute: () => unknown,
+  ): unknown {
+    const revision = worksheet.workbook.revision;
+    const key = rule.type === 'topN' ? `${rule.id}:n${rule.n ?? 10}` : rule.id;
+    const cached = this.scans.get(key);
+    if (cached && cached.revision === revision) return cached.data;
+    const data = compute();
+    this.scans.set(key, { revision, data });
+    return data;
+  }
+
   private rangeNumbers(range: string, worksheet: Worksheet): number[] {
-    const rect = parseRange(range);
+    const rect = this.clampRange(range, worksheet);
+    if (!rect) return [];
     const out: number[] = [];
     for (let r = rect.top; r <= rect.bottom; r++) {
       for (let c = rect.left; c <= rect.right; c++) {
@@ -120,7 +154,8 @@ export class ConditionalFormatEngine {
   }
 
   private rangeValues(range: string, worksheet: Worksheet): unknown[] {
-    const rect = parseRange(range);
+    const rect = this.clampRange(range, worksheet);
+    if (!rect) return [];
     const out: unknown[] = [];
     for (let r = rect.top; r <= rect.bottom; r++) {
       for (let c = rect.left; c <= rect.right; c++) {
@@ -129,6 +164,17 @@ export class ConditionalFormatEngine {
       }
     }
     return out;
+  }
+
+  /** Clamp a rule range to the sheet dimensions (M2); null when outside. */
+  private clampRange(range: string, worksheet: Worksheet) {
+    const rect = parseRange(range);
+    const top = Math.max(0, rect.top);
+    const left = Math.max(0, rect.left);
+    const bottom = Math.min(worksheet.rowCount - 1, rect.bottom);
+    const right = Math.min(worksheet.columnCount - 1, rect.right);
+    if (top > bottom || left > right) return null;
+    return { top, left, bottom, right };
   }
 }
 

@@ -29,15 +29,23 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "import": "./dist/index.js",
+      "require": "./dist/cjs/index.js"
     },
     "./worker-main": {
       "types": "./dist/worker-main.d.ts",
-      "import": "./dist/worker-main.js"
+      "import": "./dist/worker-main.js",
+      "require": "./dist/cjs/worker-main.js"
     }
   },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc -p tsconfig.json"
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && node ../../scripts/write-cjs-package.mjs dist/cjs"
   },
   "dependencies": {
     "@ezygrid/model": "workspace:*"

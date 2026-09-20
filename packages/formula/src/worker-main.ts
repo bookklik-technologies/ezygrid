@@ -19,9 +19,11 @@ workerSelf.onmessage = (event: { data: CalcRequest }) => {
     const result = evaluateStandalone(request.expression, request.values);
     workerSelf.postMessage({ id: request.id, result, matrix: shapeResult(result) });
   } catch (error) {
+    // Errors travel in a dedicated field (M4): a bare string in `result`
+    // would be indistinguishable from a legitimate string cell value.
     workerSelf.postMessage({
       id: request.id,
-      result: String((error as Error).message ?? error),
+      error: String((error as Error).message ?? error),
     });
   }
 };

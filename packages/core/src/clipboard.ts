@@ -74,7 +74,13 @@ export class ClipboardService {
     this.buffer = ClipboardService.fromTSV(text);
   }
 
-  /** TSV text of the clipboard buffer (external format). */
+  /**
+   * TSV text of the clipboard buffer (external format). TSV has no quoting
+   * convention for special characters (M3): Excel/Sheets paste quote
+   * characters literally, so `"` is never escaped here. Cells containing
+   * tabs or newlines are quoted so the row structure survives round-trips
+   * through quote-aware TSV parsers (including this service's own fromTSV).
+   */
   toTSV(): string {
     if (!this.buffer) return '';
     return this.buffer.cells
@@ -82,7 +88,7 @@ export class ClipboardService {
         row
           .map((cell) => {
             const text = cell.formula ?? (cell.raw === null || cell.raw === undefined ? '' : String(cell.raw));
-            return /[\\\t\n"]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+            return /[\t\n\r]/.test(text) ? `"${text}"` : text;
           })
           .join('\t'),
       )

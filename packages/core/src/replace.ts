@@ -32,7 +32,9 @@ export function replace(
   // SearchResult.text is the ORIGINAL cell text (never lowercased), so the
   // rest of the string keeps its casing.
   const updated = replaceOccurrences(hit.text, query, replacement, options);
-  const operation = worksheet.setValue(hit.row, hit.column, updated);
+  // Replacement text stays literal (M10): a replacement beginning with "="
+  // must not silently turn a text cell into a live formula.
+  const operation = worksheet.setValue(hit.row, hit.column, updated, { literal: true });
   return operation ? hit : undefined;
 }
 
@@ -49,7 +51,7 @@ export function replaceAll(
     // Replace every occurrence within the cell, not just the first.
     const updated = replaceOccurrences(hit.text, query, replacement, options);
     if (updated === hit.text) continue;
-    const operation = worksheet.setValue(hit.row, hit.column, updated);
+    const operation = worksheet.setValue(hit.row, hit.column, updated, { literal: true });
     // Only successful writes count as replacements.
     if (operation) count += 1;
   }

@@ -148,18 +148,23 @@ function pushField(row: unknown[], field: string, numbers: boolean): void {
 
 export interface StringifyCsvOptions {
   delimiter?: string;
-  /** Prefix =, +, -, @ with an apostrophe so spreadsheet apps treat data as text (§50.3). */
+  /**
+   * Prefix =, +, -, @ with an apostrophe so spreadsheet apps treat data as
+   * text (§50.3). Defaults to true: exported CSV must be safe to open in
+   * Excel/LibreOffice by default. Pass false to write raw values.
+   */
   escapeFormulas?: boolean;
 }
 
 /** Serialize rows to CSV with RFC 4180 quoting. */
 export function stringifyCsv(rows: unknown[][], options: StringifyCsvOptions = {}): string {
   const delimiter = options.delimiter ?? ',';
+  const escapeFormulas = options.escapeFormulas !== false;
   const lines: string[] = [];
   for (const row of rows) {
     const fields = row.map((value) => {
       let text = value === null || value === undefined ? '' : String(value);
-      if (options.escapeFormulas && /^[=+@-]/.test(text)) {
+      if (escapeFormulas && /^[=+@-]/.test(text)) {
         text = `'${text}`;
       }
       if (text.includes('"') || text.includes(delimiter) || /[\r\n]/.test(text)) {

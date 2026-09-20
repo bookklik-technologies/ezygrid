@@ -30,6 +30,11 @@ export class MediaStore {
   private objects: MediaObject[] = [];
 
   addImage(image: Omit<ImageMedia, 'id' | 'kind'>): ImageMedia {
+    // Scheme allowlist (L2): http: images in exported workbooks leak IPs
+    // (tracking pixels); only https/data/blob sources are accepted.
+    if (!/^(https:|data:image\/(png|jpeg|gif|webp);base64,|blob:)/i.test(image.src ?? '')) {
+      throw new Error('image src must be an https:, data:image (base64), or blob: URL');
+    }
     const full: ImageMedia = { ...image, kind: 'image', id: (image as Partial<ImageMedia>).id ?? createId('media') };
     this.objects.push(full);
     return full;

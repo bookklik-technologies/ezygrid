@@ -112,6 +112,28 @@ export class HistoryService {
     return entry;
   }
 
+  /**
+   * Return a popped entry to its originating stack after a failed replay
+   * (L10): popUndo/popRedo move the entry immediately, so a replay that
+   * throws mid-application would otherwise leave the workbook half-restored
+   * with the entry stranded on the opposite stack.
+   */
+  restoreUndo(entry: HistoryEntry): void {
+    const index = this.redoStack.indexOf(entry);
+    if (index >= 0) {
+      this.redoStack.splice(index, 1);
+      this.undoStack.push(entry);
+    }
+  }
+
+  restoreRedo(entry: HistoryEntry): void {
+    const index = this.undoStack.indexOf(entry);
+    if (index >= 0) {
+      this.undoStack.splice(index, 1);
+      this.redoStack.push(entry);
+    }
+  }
+
   clear(): void {
     this.undoStack.length = 0;
     this.redoStack.length = 0;

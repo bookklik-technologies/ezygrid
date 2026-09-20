@@ -14,9 +14,11 @@ export interface CalcRequest {
 
 export interface CalcResponse {
   id: number;
-  /** Scalar result or spilled matrix values. */
-  result: RuntimeValue;
+  /** Scalar result or spilled matrix values (absent when `error` is set). */
+  result?: RuntimeValue;
   matrix?: { rows: number; columns: number; values: RuntimeValue[][] };
+  /** Present when evaluation failed: transport-level failures are errors, never cell values. */
+  error?: string;
 }
 
 /**

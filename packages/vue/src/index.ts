@@ -40,6 +40,9 @@ export const Spreadsheet = defineComponent({
     onBeforeUnmount(() => {
       renderer?.destroy();
       renderer = undefined;
+      // Release the model so a consumer-held component ref does not keep
+      // the whole workbook graph alive after unmount (M8).
+      workbook = undefined;
     });
 
     expose({

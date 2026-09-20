@@ -166,6 +166,10 @@ export class GridRenderer {
           case 'rows.resize':
           case 'columns.resize':
             break;
+          case 'view.update':
+            // Repaint marker for history-less mutations (visibility, freeze,
+            // filters, charts/media, groups, nested headers).
+            break;
           case 'workbook.update': {
             const operations = (operation.payload as { operations?: import('@ezygrid/model').Operation[] }).operations ?? [];
             for (const change of operations) {
@@ -1044,8 +1048,44 @@ export class GridRenderer {
   private onScroll = (): void => {
     this.scrollRow = this.zIndexRow(this.scrollTop());
     this.scrollCol = this.zIndexColumn(this.scrollLeft());
-    this.render();
+    // Scroll-coalescing (L4): a synchronous repaint per scroll event janks
+    // over large sheets, so events arriving within one frame budget (~16ms)
+    // are coalesced into a single rAF repaint. The first event still paints
+    // synchronously to keep reads-after-scroll deterministic.
+    if (this.scrollFrame !== null) return;
+    const now = Date.now();
+    if (now - this.lastScrollRender >= 16) {
+      this.lastScrollRender = now;
+      this.render();
+      return;
+    }
+    this.scrollFrame = this.requestFrame(() => {
+      this.scrollFrame = null;
+      this.lastScrollRender = Date.now();
+      this.render();
+    });
   };
+
+  private scrollFrame: number | null = null;
+  private lastScrollRender = 0;
+
+  private requestFrame(callback: () => void): number | null {
+    const view = this.container.ownerDocument.defaultView;
+    const raf = view?.requestAnimationFrame;
+    if (typeof raf !== 'function') {
+      callback();
+      return null;
+    }
+    return raf.call(view!, callback);
+  }
+
+  private cancelScrollFrame(): void {
+    if (this.scrollFrame === null) return;
+    const view = this.container.ownerDocument.defaultView;
+    const cancel = view?.cancelAnimationFrame;
+    if (typeof cancel === 'function') cancel.call(view!, this.scrollFrame);
+    this.scrollFrame = null;
+  }
 
   private onMouseDown = (event: MouseEvent): void => {
     // Right-click selection is handled by the context menu so ranges survive.
@@ -2389,6 +2429,7 @@ export class GridRenderer {
     if (this.destroyed) return;
     this.destroyed = true;
     this.clearHeaderResize();
+    this.cancelScrollFrame();
     this.resizeObserver?.disconnect();
     this.shell?.destroy();
     this.formulaBarEdit = null;

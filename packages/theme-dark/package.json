@@ -29,5 +29,11 @@
     ".": {
       "default": "./index.css"
     }
-  }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "index.css"
+  ]
 }

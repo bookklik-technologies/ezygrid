@@ -178,7 +178,7 @@ export function openPanel(host: EditorShell, name: string): void {
   } else if (name === 'freeze') {
     const panel = host.panel('Freeze panes');
     attach(panel, [num('rows', 'Leading rows', sheet.freezeRows, 0, sheet.rowCount), num('columns', 'Leading columns', sheet.freezeColumns, 0, sheet.columnCount)], (v) => {
-      sheet.freezeRows = Number(v.rows); sheet.freezeColumns = Number(v.columns); renderer.render();
+      sheet.freezeRows = Number(v.rows); sheet.freezeColumns = Number(v.columns);
     });
   } else if (name === 'pagination') {
     const panel = host.panel('Pagination');
@@ -318,7 +318,7 @@ export function openPanel(host: EditorShell, name: string): void {
       const target = host.panel(object ? 'Edit object' : image ? 'Insert image' : 'Insert shape');
       const fields: Field[] = image ? [text('src', 'Image URL', object?.kind === 'image' ? object.src : uploaded, true), text('alt', 'Alternative text', object?.kind === 'image' ? object.alt : '')] : [pick('shape', 'Shape', ['rect', 'ellipse', 'textbox'], object?.kind === 'shape' ? object.shape : 'rect'), text('text', 'Text', object?.kind === 'shape' ? object.text : ''), { key: 'fill', label: 'Fill', type: 'color', value: object?.kind === 'shape' ? object.fill ?? '#e6fff4' : '#e6fff4' }, { key: 'stroke', label: 'Stroke', type: 'color', value: object?.kind === 'shape' ? object.stroke ?? '#00c47a' : '#00c47a' }, { key: 'textColor', label: 'Text color', type: 'color', value: object?.kind === 'shape' ? object.textColor ?? '#0f172a' : '#0f172a' }];
       attach(target, [...fields, ...positionFields(object), num('zIndex', 'Stack order', object?.zIndex ?? 1)], (v) => {
-        if (image && !/^(https?:|data:image\/(png|jpeg|gif|webp);base64,|blob:)/i.test(v.src!)) throw new Error('Use an HTTP(S) image URL or upload a PNG, JPEG, GIF, or WebP.');
+        if (image && !/^(https:|data:image\/(png|jpeg|gif|webp);base64,|blob:)/i.test(v.src!)) throw new Error('Use an HTTPS image URL or upload a PNG, JPEG, GIF, or WebP.');
         host.mutate(() => {
           const placement = { ...position(v), zIndex: Number(v.zIndex) };
           if (image) {

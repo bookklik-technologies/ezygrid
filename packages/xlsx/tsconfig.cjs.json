@@ -1,0 +1,19 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "node10",
+    "outDir": "dist/cjs",
+    "rootDir": "src",
+    "composite": false,
+    "declaration": true,
+    "declarationMap": false,
+    "paths": {
+      "@ezygrid/core": ["../core/dist/index.d.ts"],
+      "@ezygrid/core/xlsx": ["../core/dist/xlsx/index.d.ts"],
+      "@ezygrid/core/xlsx/*": ["../core/dist/xlsx/*.d.ts"],
+      "@ezygrid/model": ["../model/dist/index.d.ts"]
+    }
+  },
+  "include": ["src"]
+}

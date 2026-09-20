@@ -69,7 +69,13 @@ export type OperationType =
   | 'columns.resize'
   | 'worksheet.add'
   | 'worksheet.remove'
-  | 'worksheet.rename';
+  | 'worksheet.rename'
+  /**
+   * Renderer repaint marker for mutations that carry no history record
+   * (visibility, grouping, frozen panes, filters, charts/media/pivots).
+   * Emitted without an inverse so it never enters undo history (F08).
+   */
+  | 'view.update';
 
 export const op = <T>(
   workbookId: string,

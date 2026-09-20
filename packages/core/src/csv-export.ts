@@ -7,7 +7,11 @@ export interface ToCsvOptions extends StringifyCsvOptions {
   range?: string;
 }
 
-/** Export the used range (or a given range) as CSV, using display formatting. */
+/**
+ * Export the used range (or a given range) as CSV, using display formatting.
+ * Formula-escaping defaults to true (CSV injection safety); pass
+ * `{ escapeFormulas: false }` to write raw values.
+ */
 export function worksheetToCsv(worksheet: Worksheet, options: ToCsvOptions = {}): string {
   const rect = options.range ? parseRange(options.range) : worksheet.cells.usedRange;
   if (!rect) return '';

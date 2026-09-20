@@ -15,7 +15,7 @@ pnpm install
 pnpm build
 ```
 
-Packages are consumed from `packages/*/dist` (workspace `workspace:*` dependencies). They are ESM-only (`"type": "module"`), with full `.d.ts` declarations.
+Packages are consumed from `packages/*/dist` (workspace `workspace:*` dependencies). `@ezygrid/model`, `@ezygrid/formula`, `@ezygrid/csv`, `@ezygrid/core` and `@ezygrid/xlsx` ship dual builds: ESM by default plus a CommonJS build under their `require` export condition. `@ezygrid/react`, `@ezygrid/vue` and `@ezygrid/web-component` are ESM-only — framework-native consumers always use a bundler. All packages ship full `.d.ts` declarations.
 
 ## Installing packages into your project
 
@@ -58,3 +58,7 @@ pnpm lint        # eslint
 ```
 
 TypeScript configuration is strict (`ES2022` target, `noUncheckedIndexedAccess`).
+
+## Platform requirements
+
+XLSX import inflates real Excel archives with the **Compression Streams API** (`deflate-raw`). Supported runtimes: Chrome/Edge ≥ 80, Safari ≥ 16.4, Firefox ≥ 113, Node ≥ 18. On older runtimes `workbookFromXlsx` throws a descriptive error instead of crashing; CSV and JSON import/export have no such floor.

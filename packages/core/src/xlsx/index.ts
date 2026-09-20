@@ -22,6 +22,15 @@ export function workbookToXlsx(workbook: Workbook): Uint8Array {
 }
 
 /**
+ * Per-part XML size caps for regex scanning (M7): a hostile archive can
+ * force heavy O(n²) scanning on the main thread; parts beyond these bounds
+ * are rejected with a clear error instead of hanging the tab. Real Excel
+ * sheets stay far below these limits.
+ */
+const MAX_PART_XML_BYTES = 64 * 1024 * 1024; // sheet/sharedStrings/styles parts
+const MAX_PART_COUNT = 1024;
+
+/**
  * Resolve a relationship target to a package part path. Targets are relative
  * to xl/ (or package-absolute with a leading slash).
  */
@@ -40,19 +49,34 @@ function resolvePartPath(target: string): string {
  */
 export async function workbookFromXlsx(bytes: Uint8Array): Promise<Workbook> {
   const files = await readZip(bytes);
+  if (files.size > MAX_PART_COUNT) {
+    throw new Error(`xlsx package declares too many parts (${files.size} > ${MAX_PART_COUNT})`);
+  }
+  const decodedCache = new Map<string, string>();
+  const decodeChecked = (path: string, data: Uint8Array): string => {
+    if (data.byteLength > MAX_PART_XML_BYTES) {
+      throw new Error(`xlsx part ${path} exceeds the ${MAX_PART_XML_BYTES} byte import limit`);
+    }
+    let text = decodedCache.get(path);
+    if (text === undefined) {
+      text = decode(data);
+      decodedCache.set(path, text);
+    }
+    return text;
+  };
   const workbookXmlData = files.get('xl/workbook.xml');
   if (!workbookXmlData) throw new Error('missing xl/workbook.xml');
-  const sheetRefs = parseWorkbookXml(decode(workbookXmlData));
+  const sheetRefs = parseWorkbookXml(decodeChecked('xl/workbook.xml', workbookXmlData));
   const sharedStringsXml = files.get('xl/sharedStrings.xml');
-  const sharedStrings = sharedStringsXml ? parseSharedStrings(decode(sharedStringsXml)) : [];
+  const sharedStrings = sharedStringsXml ? parseSharedStrings(decodeChecked('xl/sharedStrings.xml', sharedStringsXml)) : [];
   const stylesXml = files.get('xl/styles.xml');
-  const formats = stylesXml ? parseStylesXml(decode(stylesXml)) : [];
-  const cellStyles = stylesXml ? parseCellStyles(decode(stylesXml)) : [];
+  const formats = stylesXml ? parseStylesXml(decodeChecked('xl/styles.xml', stylesXml)) : [];
+  const cellStyles = stylesXml ? parseCellStyles(decodeChecked('xl/styles.xml', stylesXml)) : [];
 
   // Resolve each sheet's part through the workbook relationships instead of
   // guessing filenames from sheet order.
   const relsXml = files.get('xl/_rels/workbook.xml.rels');
-  const rels = relsXml ? parseWorkbookRels(decode(relsXml)) : new Map<string, string>();
+  const rels = relsXml ? parseWorkbookRels(decodeChecked('xl/_rels/workbook.xml.rels', relsXml)) : new Map<string, string>();
 
   const sheets = sheetRefs.map((ref, index) => {
     const relTarget = ref.rid !== undefined ? rels.get(ref.rid) : undefined;
@@ -63,8 +87,9 @@ export async function workbookFromXlsx(bytes: Uint8Array): Promise<Workbook> {
     if (!xml) {
       throw new Error(`missing worksheet part ${path} for sheet "${ref.name}"`);
     }
-    const parsed = parseSheetXml(decode(xml));
-    return { name: ref.name, ...parsed, xml: decode(xml) };
+    const xmlText = decodeChecked(path, xml);
+    const parsed = parseSheetXml(xmlText);
+    return { name: ref.name, ...parsed, xml: xmlText };
   });
 
   const { configs, formatsBySheet } = buildWorksheetConfigs(sheets, sharedStrings, formats);

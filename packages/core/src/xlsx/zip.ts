@@ -53,13 +53,17 @@ function writeLE(bytes: Uint8Array, offset: number, value: number, size: number)
  * consumers including Excel and LibreOffice.
  */
 export function createZip(entries: ZipEntry[]): Uint8Array {
+  // Name size is reserved in UTF-8 bytes (M5): with the UTF-8 flag set a
+  // non-ASCII entry name encodes to more bytes than `name.length`, which
+  // would make `buffer.set` throw RangeError mid-write.
+  const encoder = new TextEncoder();
   let size = 0;
   for (const entry of entries) {
-    size += 30 + entry.name.length + entry.data.length + 46 + entry.name.length;
+    const nameBytes = encoder.encode(entry.name).length;
+    size += 30 + nameBytes + entry.data.length + 46 + nameBytes;
   }
   size += 22;
   const buffer = new Uint8Array(size);
-  const encoder = new TextEncoder();
   let offset = 0;
   const central: { name: string; offset: number; crc: number; size: number }[] = [];
 
@@ -138,8 +142,16 @@ function readLE(data: Uint8Array, offset: number, size: number): number {
 /**
  * Inflate a raw deflate stream with an expanded-size cap enforced WHILE
  * streaming, so an over-budget entry aborts before its bytes are allocated (F03).
+ * Requires CompressionStreams (deflate-raw): Safari ≥ 16.4, Firefox ≥ 113,
+ * Node ≥ 18 (M6) — feature-detected with a clear error instead of a crash.
  */
 async function inflateRaw(data: Uint8Array, limit: number): Promise<Uint8Array> {
+  if (typeof DecompressionStream !== 'function') {
+    throw new Error(
+      'XLSX import requires the Compression Streams API (deflate-raw). ' +
+        'Use Safari ≥ 16.4, Firefox ≥ 113, Chrome ≥ 80, or Node ≥ 18.',
+    );
+  }
   const source = new Blob([data as unknown as BlobPart]);
   let produced = 0;
   const counter = new TransformStream<Uint8Array, Uint8Array>({
