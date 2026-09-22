@@ -1,0 +1,7 @@
+interface:
+  display_name: "Ezygrid UI Customization"
+  short_description: "Configure Ezygrid renderer UI and themes"
+  default_prompt: "Use $ezygrid-ui-customization to configure a compact RTL grid with an accessible custom theme."
+
+policy:
+  allow_implicit_invocation: true

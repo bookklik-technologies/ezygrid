@@ -9,6 +9,7 @@ export const nav: DefaultTheme.NavItem[] = [
   {
     text: 'Resources',
     items: [
+      { text: 'Development skills', link: '/guide/development-skills' },
       {
         text: 'Changelog (GitHub)',
         link: 'https://github.com/bookklik-technologies/ezygrid/releases',

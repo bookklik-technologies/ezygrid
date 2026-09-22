@@ -1,0 +1,7 @@
+interface:
+  display_name: "Ezygrid Workbook Creation"
+  short_description: "Build Ezygrid workbooks, sheets and structure"
+  default_prompt: "Use $ezygrid-workbook-creation to build a multi-sheet budget workbook with undoable batched updates."
+
+policy:
+  allow_implicit_invocation: true

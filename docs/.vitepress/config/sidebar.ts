@@ -54,6 +54,7 @@ export const guideSidebar: DefaultTheme.SidebarItem[] = [
     items: [
       { text: 'Plugins', link: '/guide/plugins' },
       { text: 'Theming', link: '/guide/theming' },
+      { text: 'Development skills', link: '/guide/development-skills' },
     ],
   },
   {

@@ -1,0 +1,7 @@
+interface:
+  display_name: "Ezygrid Visualization Creation"
+  short_description: "Create Ezygrid charts, pivots and media"
+  default_prompt: "Use $ezygrid-visualization-creation to add a source-bound chart and refreshable revenue pivot to a worksheet."
+
+policy:
+  allow_implicit_invocation: true

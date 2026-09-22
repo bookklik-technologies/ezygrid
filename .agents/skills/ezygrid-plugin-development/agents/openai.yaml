@@ -1,0 +1,7 @@
+interface:
+  display_name: "Ezygrid Plugin Development"
+  short_description: "Build lifecycle-safe Ezygrid extensions"
+  default_prompt: "Use $ezygrid-plugin-development to create a rating command plugin that cleans up correctly across renderer attachments."
+
+policy:
+  allow_implicit_invocation: true

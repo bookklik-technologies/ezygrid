@@ -21,6 +21,8 @@ Framework-agnostic JavaScript/TypeScript spreadsheet and data-grid library by
 
 Full guides and API reference: <https://bookklik-technologies.github.io/ezygrid/>
 
+- [Development skills](docs/guide/development-skills.md) — seven repository skills for AI-assisted workbook, formula, data-rule, visualization, file, plugin and UI development
+
 ## Quick start
 
 ### Declarative (browser bundle)

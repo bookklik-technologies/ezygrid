@@ -1,0 +1,7 @@
+interface:
+  display_name: "Ezygrid Import and Export"
+  short_description: "Handle safe Ezygrid CSV, XLSX and JSON files"
+  default_prompt: "Use $ezygrid-import-export to add safe CSV export and XLSX workbook import with clear fidelity limits."
+
+policy:
+  allow_implicit_invocation: true

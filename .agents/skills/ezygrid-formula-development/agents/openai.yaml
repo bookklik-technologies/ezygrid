@@ -1,0 +1,7 @@
+interface:
+  display_name: "Ezygrid Formula Development"
+  short_description: "Author Ezygrid formulas and custom functions"
+  default_prompt: "Use $ezygrid-formula-development to add a custom conversion function and formulas that handle blank cells safely."
+
+policy:
+  allow_implicit_invocation: true

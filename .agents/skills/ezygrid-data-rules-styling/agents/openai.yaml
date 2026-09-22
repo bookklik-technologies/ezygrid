@@ -1,0 +1,7 @@
+interface:
+  display_name: "Ezygrid Data Rules and Styling"
+  short_description: "Style cells and enforce Ezygrid data rules"
+  default_prompt: "Use $ezygrid-data-rules-styling to format a status table with dropdown editing, validation and conditional colors."
+
+policy:
+  allow_implicit_invocation: true
