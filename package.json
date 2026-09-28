@@ -1,6 +1,6 @@
 {
   "name": "@bookklik/ezygrid",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Framework-agnostic JavaScript/TypeScript spreadsheet and data-grid library.",
   "keywords": [
     "spreadsheet",
@@ -17,6 +17,31 @@
     "name": "a-hakim",
     "url": "https://github.com/bookklik-technologies"
   },
+  "type": "module",
+  "main": "./dist/ezygrid.cjs",
+  "module": "./dist/ezygrid.esm.js",
+  "unpkg": "./dist/ezygrid.umd.js",
+  "jsdelivr": "./dist/ezygrid.umd.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/ezygrid.esm.js",
+      "require": "./dist/ezygrid.cjs"
+    },
+    "./browser": {
+      "types": "./dist/browser.d.ts",
+      "default": "./dist/browser/ezygrid.js"
+    },
+    "./themes/default.css": "./dist/themes/default.css",
+    "./themes/dark.css": "./dist/themes/dark.css",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/bookklik-technologies/ezygrid.git"
@@ -30,19 +55,21 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "pnpm -r --filter \"./packages/**\" run build",
+    "build": "pnpm -r --filter \"./packages/**\" run build && node scripts/build-dist.mjs",
     "test": "vitest run",
     "typecheck": "tsc --build",
     "lint": "eslint .",
     "docs:dev": "vitepress dev docs",
     "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "prepublishOnly": "npm test && npm run build"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
     "@types/node": "^20.14.0",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
+    "dts-bundle-generator": "^9.5.1",
     "esbuild": "0.21.5",
     "eslint": "^9.39.5",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -50,7 +77,7 @@
     "happy-dom": "^20.14.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
-    "typescript": "^5.6.0",
+    "typescript": "catalog:",
     "typescript-eslint": "^8.70.0",
     "vitepress": "^1.6.4",
     "vitest": "^2.1.0",

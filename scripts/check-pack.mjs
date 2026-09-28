@@ -10,29 +10,28 @@ import { execSync } from 'node:child_process';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-const packagesDir = 'packages';
 let failures = 0;
 
 function exportedTargets(pkg) {
   const targets = [];
   const collect = (value) => {
     if (typeof value === 'string') {
-      if (value.endsWith('.js') || value.endsWith('.css')) targets.push(value);
+      if (value.endsWith('.js') || value.endsWith('.css') || value.endsWith('.cjs')) targets.push(value);
     } else if (value && typeof value === 'object') {
       for (const child of Object.values(value)) collect(child);
     }
   };
   if (pkg.main) targets.push(pkg.main);
+  if (pkg.module) targets.push(pkg.module);
+  if (pkg.types) targets.push(pkg.types);
   if (pkg.exports) collect(pkg.exports);
   return targets;
 }
 
-for (const name of readdirSync(packagesDir)) {
-  const dir = join(packagesDir, name);
-  const pkgFile = join(dir, 'package.json');
-  if (!existsSync(pkgFile)) continue;
+function checkPackage(label, dir, pkgFile) {
+  if (!existsSync(pkgFile)) return;
   const pkg = JSON.parse(readFileSync(pkgFile, 'utf8'));
-  if (pkg.private) continue;
+  if (pkg.private) return;
 
   const json = execSync('npm pack --dry-run --json', { cwd: dir, encoding: 'utf8' });
   const packed = JSON.parse(json)[0];
@@ -57,13 +56,20 @@ for (const name of readdirSync(packagesDir)) {
     }
   }
   if (problems.length === 0) {
-    console.log(`${pkg.name}: ok (${packed.files.length} files)`);
+    console.log(`${pkg.name || label}: ok (${packed.files.length} files)`);
   } else {
     failures++;
-    console.error(`${pkg.name}: FAILED`);
+    console.error(`${pkg.name || label}: FAILED`);
     for (const problem of problems) console.error(`  - ${problem}`);
   }
 }
+
+const packagesDir = 'packages';
+for (const name of readdirSync(packagesDir)) {
+  const dir = join(packagesDir, name);
+  checkPackage(name, dir, join(dir, 'package.json'));
+}
+checkPackage('.', '.', 'package.json');
 
 if (failures > 0) {
   console.error(`\n${failures} package(s) would publish a broken tarball.`);

@@ -31,14 +31,8 @@ jobs:
       - name: Typecheck
         run: pnpm typecheck
 
-      - name: Test
-        run: pnpm test
-
-      - name: Build packages
-        run: pnpm build
-
-      - name: Publish all packages
-        run: pnpm publish -r --no-git-checks --access public
+      - name: Publish root package (prepublishOnly runs tests and the full build)
+        run: pnpm publish --no-git-checks --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: true

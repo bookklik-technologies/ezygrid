@@ -25,35 +25,42 @@ Full guides and API reference: <https://bookklik-technologies.github.io/ezygrid/
 
 ## Quick start
 
-### Declarative (browser bundle)
+### Declarative (script tag)
 
 ```html
 <div data-ezg-editor style="height: 460px"></div>
-<script src="/ezygrid/ezygrid.js"></script>
+<script src="https://unpkg.com/@bookklik/ezygrid/dist/ezygrid.umd.js"></script>
 ```
 
-Copy the complete `packages/core/dist/browser/` directory to your static
-assets (build it from this repository with `pnpm build`). The loader fetches
-its dependency files relative to itself and enables declarative startup
-automatically — no consumer bundling step is required.
+The UMD bundle mounts every `[data-ezg-editor]` host automatically and
+exposes the `Ezygrid` global for programmatic use — no bundler required.
 
-### ESM / bundlers
+### npm / ESM
 
-```html
-<div id="editor" style="height: 460px"></div>
+```bash
+npm install @bookklik/ezygrid
 ```
 
 ```js
-import { Ezygrid } from '@ezygrid/core';
+import { Ezygrid } from '@bookklik/ezygrid';
 
 const editor = new Ezygrid({ target: '#editor' });
 ```
 
-Or use the automatic startup entry point with declarative markup:
+Optional official themes ship as CSS files:
 
 ```js
-import '@ezygrid/core/auto';
+import '@bookklik/ezygrid/themes/default.css';
 ```
+
+For script-tag deployments without a bundler you can also host the classic
+loader (`dist/browser/`) from your static assets; it fetches its dependency
+files relative to itself and enables declarative startup automatically.
+
+### TypeScript
+
+Type declarations are bundled with the package (`dist/index.d.ts`) — no
+additional `@types` install is needed.
 
 See [Getting started](docs/getting-started.md) for configuration, lifecycle,
 and dynamic hosts.
@@ -74,7 +81,7 @@ pnpm typecheck
 
 ## Status
 
-Early development — APIs are still stabilizing; treat it as non-production.
+v0.1.x — the public API is stabilizing; semver guarantees apply from 1.0.
 
 ## License
 

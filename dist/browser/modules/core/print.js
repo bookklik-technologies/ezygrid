@@ -1,0 +1,115 @@
+document.currentScript.__ezygridRegister("core/print", function(require, module, exports) {
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.buildPrintHtml = buildPrintHtml;
+exports.printHtml = printHtml;
+const format_js_1 = require("./format.js");
+const PAPER_MM = {
+    A4: { width: 210, height: 297 },
+    Letter: { width: 216, height: 279 },
+};
+function escapeHtml(text) {
+    return text.replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' })[c]);
+}
+/**
+ * Print layout (§36): builds a self-contained HTML document with @page rules
+ * for paper size, orientation and margins. Browsers print or save it as PDF.
+ */
+function buildPrintHtml(workbook, sheetName, options = {}) {
+    const sheet = workbook.getWorksheet(sheetName) ?? workbook.activeWorksheet;
+    const used = sheet.cells.usedRange;
+    const orientation = options.orientation ?? 'portrait';
+    const paperSize = options.paperSize ?? 'A4';
+    const marginMm = options.marginMm ?? 15;
+    const gridlines = options.gridlines ?? true;
+    const repeatHeaderRows = Math.max(0, options.repeatHeaderRows ?? 0);
+    const paper = PAPER_MM[paperSize];
+    const width = orientation === 'landscape' ? paper.height : paper.width;
+    const height = orientation === 'landscape' ? paper.width : paper.height;
+    let body = '';
+    if (used) {
+        const thead = repeatHeaderRows > 0
+            ? `<thead>${rowsHtml(sheet, used.top, used.top + repeatHeaderRows - 1, used, gridlines)}</thead>`
+            : '';
+        const tbody = `<tbody>${rowsHtml(sheet, used.top + repeatHeaderRows, used.bottom, used, gridlines)}</tbody>`;
+        body = `<table><thead>${thead}</thead>${tbody}</table>`;
+        void thead;
+    }
+    return `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>${escapeHtml(sheet.name)}</title>
+<style>
+@page { size: ${width}mm ${height}mm; margin: ${marginMm}mm; }
+body { font-family: system-ui, sans-serif; font-size: 11px; margin: 0; }
+table { border-collapse: collapse; table-layout: fixed; width: 100%; }
+td { padding: 2px 6px; overflow: hidden; white-space: nowrap; }
+${gridlines ? 'td { border: 1px solid #e2e8f0; }' : 'td { border: none; }'}
+thead td { font-weight: bold; }
+</style>
+</head>
+<body>
+${body}
+</body>
+</html>`;
+}
+function rowsHtml(sheet, from, to, used, gridlines) {
+    if (!used)
+        return '';
+    const out = [];
+    for (let r = from; r <= to && r <= used.bottom; r++) {
+        const cells = [];
+        for (let c = used.left; c <= used.right; c++) {
+            const value = sheet.getValue(r, c);
+            if (sheet.merges.isCovered(r, c))
+                continue;
+            const merge = sheet.merges.findAt(r, c);
+            const style = { ...sheet.getStyle(r, c), ...sheet.conditionalFormats.evaluate(sheet, r, c) };
+            const styles = [];
+            if (style?.bold)
+                styles.push('font-weight:bold');
+            if (style?.italic)
+                styles.push('font-style:italic');
+            if (style?.color)
+                styles.push(`color:${style.color}`);
+            if (style?.background)
+                styles.push(`background:${style.background}`);
+            if (style?.align)
+                styles.push(`text-align:${style.align}`);
+            if (style?.underline)
+                styles.push('text-decoration:underline');
+            if (style?.fontFamily)
+                styles.push(`font-family:${style.fontFamily}`);
+            if (style?.fontSize)
+                styles.push(`font-size:${style.fontSize}px`);
+            styles.push(`white-space:${style?.wrap ? 'pre-wrap' : 'pre'}`, `vertical-align:${style?.verticalAlign ?? 'top'}`, `height:${sheet.rowSizes.sizeOf(r)}px`, `width:${sheet.columnSizes.sizeOf(c)}px`);
+            for (const edge of ['top', 'right', 'bottom', 'left']) {
+                const border = style?.borders?.[edge];
+                if (border)
+                    styles.push(`border-${edge}:${border.width}px ${border.style} ${border.color}`);
+                else if (border === null)
+                    styles.push(`border-${edge}:none`);
+            }
+            cells.push(`<td${merge ? ` rowspan="${merge.bottom - merge.top + 1}" colspan="${merge.right - merge.left + 1}"` : ''} style="${escapeHtml(styles.join(';'))}">${escapeHtml((0, format_js_1.formatValue)(value, sheet.getNumberFormat(r, c)))}</td>`);
+        }
+        void gridlines;
+        out.push(`<tr>${cells.join('')}</tr>`);
+    }
+    return out.join('');
+}
+/** Renderer convenience: open a print window (browser environments only). */
+function printHtml(html) {
+    if (typeof window === 'undefined' || typeof window.open !== 'function')
+        return false;
+    const frame = window.open('', '_blank');
+    if (!frame)
+        return false;
+    frame.document.write(html);
+    frame.document.close();
+    frame.focus();
+    frame.print();
+    return true;
+}
+
+});

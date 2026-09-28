@@ -1,0 +1,16 @@
+/* @ezygrid/theme-default — light theme (§49).
+   Import after @ezygrid/core; all grid styling reads these variables. */
+/* Outfit is the grid UI font, matching the other Ezy libraries. */
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap");
+.ezygrid, .ezygrid-suite {
+  --ezygrid-font-family: Outfit, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, "Helvetica Neue", sans-serif;
+  --ezygrid-font-size: 13px;
+  --ezygrid-bg: #ffffff;
+  --ezygrid-text: #0f172a;
+  --ezygrid-gridline: #e2e8f0;
+  --ezygrid-selection: #00c47a;
+  --ezygrid-selection-soft: rgba(0, 196, 122, 0.12);
+  --ezygrid-header-bg: #f1f5f9;
+  --ezygrid-header-text: #334155;
+  --ezygrid-table-band: rgba(0, 196, 122, 0.06);
+}

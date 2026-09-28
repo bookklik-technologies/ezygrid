@@ -1,0 +1,370 @@
+{
+  "entries": {
+    "constructor": "core/ezy-grid",
+    "auto": "core/auto"
+  },
+  "modules": {
+    "core/ezy-grid": {
+      "file": "modules/core/ezy-grid.js",
+      "dependencies": {
+        "./workbook.js": "core/workbook",
+        "./renderer.js": "core/renderer"
+      }
+    },
+    "core/workbook": {
+      "file": "modules/core/workbook.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index",
+        "@ezygrid/formula": "formula/index",
+        "./merges.js": "core/merges",
+        "./tables.js": "core/tables",
+        "./validation.js": "core/validation",
+        "./conditional-format.js": "core/conditional-format",
+        "./charts.js": "core/charts",
+        "./pivot.js": "core/pivot",
+        "./media.js": "core/media",
+        "./csv-export.js": "core/csv-export",
+        "./plugins.js": "core/plugins"
+      }
+    },
+    "model/index": {
+      "file": "modules/model/index.js",
+      "dependencies": {
+        "./coordinates.js": "model/coordinates",
+        "./ids.js": "model/ids",
+        "./sparse-store.js": "model/sparse-store",
+        "./size-index.js": "model/size-index",
+        "./operations.js": "model/operations",
+        "./history.js": "model/history",
+        "./ref-transform.js": "model/ref-transform"
+      }
+    },
+    "model/coordinates": {
+      "file": "modules/model/coordinates.js",
+      "dependencies": {}
+    },
+    "model/ids": {
+      "file": "modules/model/ids.js",
+      "dependencies": {}
+    },
+    "model/sparse-store": {
+      "file": "modules/model/sparse-store.js",
+      "dependencies": {}
+    },
+    "model/size-index": {
+      "file": "modules/model/size-index.js",
+      "dependencies": {}
+    },
+    "model/operations": {
+      "file": "modules/model/operations.js",
+      "dependencies": {}
+    },
+    "model/history": {
+      "file": "modules/model/history.js",
+      "dependencies": {}
+    },
+    "model/ref-transform": {
+      "file": "modules/model/ref-transform.js",
+      "dependencies": {
+        "./coordinates.js": "model/coordinates"
+      }
+    },
+    "formula/index": {
+      "file": "modules/formula/index.js",
+      "dependencies": {
+        "./errors.js": "formula/errors",
+        "./lexer.js": "formula/lexer",
+        "./parser.js": "formula/parser",
+        "./functions.js": "formula/functions",
+        "./matrix.js": "formula/matrix",
+        "./dependency-graph.js": "formula/dependency-graph",
+        "./registry.js": "formula/registry",
+        "./worker.js": "formula/worker"
+      }
+    },
+    "formula/errors": {
+      "file": "modules/formula/errors.js",
+      "dependencies": {}
+    },
+    "formula/lexer": {
+      "file": "modules/formula/lexer.js",
+      "dependencies": {}
+    },
+    "formula/parser": {
+      "file": "modules/formula/parser.js",
+      "dependencies": {
+        "./lexer.js": "formula/lexer",
+        "@ezygrid/model": "model/index"
+      }
+    },
+    "formula/functions": {
+      "file": "modules/formula/functions.js",
+      "dependencies": {
+        "./errors.js": "formula/errors",
+        "./matrix.js": "formula/matrix"
+      }
+    },
+    "formula/matrix": {
+      "file": "modules/formula/matrix.js",
+      "dependencies": {
+        "./errors.js": "formula/errors"
+      }
+    },
+    "formula/dependency-graph": {
+      "file": "modules/formula/dependency-graph.js",
+      "dependencies": {
+        "./parser.js": "formula/parser",
+        "./functions.js": "formula/functions",
+        "./errors.js": "formula/errors",
+        "./matrix.js": "formula/matrix"
+      }
+    },
+    "formula/registry": {
+      "file": "modules/formula/registry.js",
+      "dependencies": {
+        "./functions.js": "formula/functions"
+      }
+    },
+    "formula/worker": {
+      "file": "modules/formula/worker.js",
+      "dependencies": {
+        "./parser.js": "formula/parser",
+        "./dependency-graph.js": "formula/dependency-graph",
+        "./matrix.js": "formula/matrix"
+      }
+    },
+    "core/merges": {
+      "file": "modules/core/merges.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index"
+      }
+    },
+    "core/tables": {
+      "file": "modules/core/tables.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index"
+      }
+    },
+    "core/validation": {
+      "file": "modules/core/validation.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index"
+      }
+    },
+    "core/conditional-format": {
+      "file": "modules/core/conditional-format.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index"
+      }
+    },
+    "core/charts": {
+      "file": "modules/core/charts.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index"
+      }
+    },
+    "core/pivot": {
+      "file": "modules/core/pivot.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index"
+      }
+    },
+    "core/media": {
+      "file": "modules/core/media.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index"
+      }
+    },
+    "core/csv-export": {
+      "file": "modules/core/csv-export.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index",
+        "@ezygrid/csv": "csv/index",
+        "./format.js": "core/format"
+      }
+    },
+    "csv/index": {
+      "file": "modules/csv/index.js",
+      "dependencies": {
+        "./csv.js": "csv/csv"
+      }
+    },
+    "csv/csv": {
+      "file": "modules/csv/csv.js",
+      "dependencies": {}
+    },
+    "core/format": {
+      "file": "modules/core/format.js",
+      "dependencies": {}
+    },
+    "core/plugins": {
+      "file": "modules/core/plugins.js",
+      "dependencies": {}
+    },
+    "core/renderer": {
+      "file": "modules/core/renderer.js",
+      "dependencies": {
+        "./selection.js": "core/selection",
+        "./editing.js": "core/editing",
+        "./clipboard.js": "core/clipboard",
+        "./commands.js": "core/commands",
+        "./fill.js": "core/fill",
+        "./format.js": "core/format",
+        "./chart-svg.js": "core/chart-svg",
+        "./charts.js": "core/charts",
+        "@ezygrid/formula": "formula/index",
+        "@ezygrid/model": "model/index",
+        "./workbook.js": "core/workbook",
+        "./ui/editor-shell.js": "core/ui/editor-shell",
+        "./ui/cell-style.js": "core/ui/cell-style"
+      }
+    },
+    "core/selection": {
+      "file": "modules/core/selection.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index"
+      }
+    },
+    "core/editing": {
+      "file": "modules/core/editing.js",
+      "dependencies": {}
+    },
+    "core/clipboard": {
+      "file": "modules/core/clipboard.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index"
+      }
+    },
+    "core/commands": {
+      "file": "modules/core/commands.js",
+      "dependencies": {}
+    },
+    "core/fill": {
+      "file": "modules/core/fill.js",
+      "dependencies": {
+        "./clipboard.js": "core/clipboard"
+      }
+    },
+    "core/chart-svg": {
+      "file": "modules/core/chart-svg.js",
+      "dependencies": {
+        "./charts.js": "core/charts"
+      }
+    },
+    "core/ui/editor-shell": {
+      "file": "modules/core/ui/editor-shell.js",
+      "dependencies": {
+        "../workbook.js": "core/workbook",
+        "@ezygrid/model": "model/index",
+        "./dom.js": "core/ui/dom",
+        "./styles.js": "core/ui/styles",
+        "./panels.js": "core/ui/panels",
+        "../xlsx/index.js": "core/xlsx/index",
+        "../print.js": "core/print",
+        "../theme.js": "core/theme",
+        "./suite-topbar.js": "core/ui/suite-topbar"
+      }
+    },
+    "core/ui/dom": {
+      "file": "modules/core/ui/dom.js",
+      "dependencies": {}
+    },
+    "core/ui/styles": {
+      "file": "modules/core/ui/styles.js",
+      "dependencies": {
+        "./suite-topbar-styles.js": "core/ui/suite-topbar-styles"
+      }
+    },
+    "core/ui/suite-topbar-styles": {
+      "file": "modules/core/ui/suite-topbar-styles.js",
+      "dependencies": {}
+    },
+    "core/ui/panels": {
+      "file": "modules/core/ui/panels.js",
+      "dependencies": {
+        "./dom.js": "core/ui/dom",
+        "@ezygrid/model": "model/index",
+        "../search.js": "core/search",
+        "../replace.js": "core/replace",
+        "../sort.js": "core/sort",
+        "../fill.js": "core/fill",
+        "@ezygrid/formula": "formula/index"
+      }
+    },
+    "core/search": {
+      "file": "modules/core/search.js",
+      "dependencies": {}
+    },
+    "core/replace": {
+      "file": "modules/core/replace.js",
+      "dependencies": {
+        "./search.js": "core/search"
+      }
+    },
+    "core/sort": {
+      "file": "modules/core/sort.js",
+      "dependencies": {
+        "./clipboard.js": "core/clipboard"
+      }
+    },
+    "core/xlsx/index": {
+      "file": "modules/core/xlsx/index.js",
+      "dependencies": {
+        "../workbook.js": "core/workbook",
+        "../format.js": "core/format",
+        "@ezygrid/model": "model/index",
+        "./writer.js": "core/xlsx/writer",
+        "./reader.js": "core/xlsx/reader",
+        "./zip.js": "core/xlsx/zip",
+        "./styles.js": "core/xlsx/styles"
+      }
+    },
+    "core/xlsx/writer": {
+      "file": "modules/core/xlsx/writer.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index",
+        "../format.js": "core/format",
+        "./zip.js": "core/xlsx/zip",
+        "./styles.js": "core/xlsx/styles"
+      }
+    },
+    "core/xlsx/zip": {
+      "file": "modules/core/xlsx/zip.js",
+      "dependencies": {}
+    },
+    "core/xlsx/styles": {
+      "file": "modules/core/xlsx/styles.js",
+      "dependencies": {
+        "./reader.js": "core/xlsx/reader"
+      }
+    },
+    "core/xlsx/reader": {
+      "file": "modules/core/xlsx/reader.js",
+      "dependencies": {}
+    },
+    "core/print": {
+      "file": "modules/core/print.js",
+      "dependencies": {
+        "./format.js": "core/format"
+      }
+    },
+    "core/theme": {
+      "file": "modules/core/theme.js",
+      "dependencies": {}
+    },
+    "core/ui/suite-topbar": {
+      "file": "modules/core/ui/suite-topbar.js",
+      "dependencies": {}
+    },
+    "core/ui/cell-style": {
+      "file": "modules/core/ui/cell-style.js",
+      "dependencies": {}
+    },
+    "core/auto": {
+      "file": "modules/core/auto.js",
+      "dependencies": {
+        "./ezy-grid.js": "core/ezy-grid"
+      }
+    }
+  }
+}

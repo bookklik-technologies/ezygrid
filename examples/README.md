@@ -1,14 +1,15 @@
 # Ezygrid examples
 
-Build the distribution first, then open any example directly or serve the
-repository (with WAMP: `http://localhost/ezygrid/examples/`).
+The distribution is committed to the repository, so examples work from a
+fresh clone. Rebuild it any time, then open any example directly or serve
+the repository (with WAMP: `http://localhost/ezygrid/examples/`).
 
 ```sh
-pnpm build   # generates packages/core/dist/browser/
+pnpm build   # regenerates dist/ and packages/core/dist/browser/
 ```
 
 Each example is a single self-contained HTML file loading the local browser
-loader from `packages/core/dist/browser/`. The library CSS/theme is applied by
+loader from `dist/browser/`. The library CSS/theme is applied by
 the editor itself; the only inline styles are host sizing.
 
 | Example | File | Shows |
@@ -22,5 +23,6 @@ Every example opens the full editor with its ribbon and file controls. For a
 compact embed use `renderer: { mode: 'grid' }`, or `data-ezg-mode="grid"` on a
 declarative host.
 
-When deploying, copy the complete `packages/core/dist/browser/` directory to
-your static assets; the loader fetches its dependency files relative to itself.
+When deploying, you can either host the complete `dist/browser/` directory
+(the loader fetches its dependency files relative to itself) or use the
+single-file bundle from `dist/ezygrid.umd.js`.
