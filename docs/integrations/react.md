@@ -4,8 +4,15 @@
 
 ## Install
 
+::: warning Local workspace adapter
+The `@ezygrid/*` adapters are built from this repository and are not published on public npm. The `@bookklik/ezygrid` package ships the framework-neutral editor. These instructions link a built local checkout; adjust the relative paths for your application.
+:::
+
+
 ```bash
-pnpm add @ezygrid/react @ezygrid/core @ezygrid/theme-default
+# Build the cloned Ezygrid checkout first: pnpm install && pnpm build
+# From a consuming app beside the ezygrid checkout:
+pnpm add @ezygrid/react@link:../ezygrid/packages/react @ezygrid/core@link:../ezygrid/packages/core @ezygrid/theme-default@link:../ezygrid/packages/theme-default
 ```
 
 ## Usage

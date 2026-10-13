@@ -15,7 +15,7 @@ Framework-agnostic JavaScript/TypeScript spreadsheet and data-grid library by
 - Sparse document model with stable IDs, A1 utilities and a typed operation format
 - Rendering, selection, editing and history
 - Declarative (`data-ezg-editor`), programmatic and script-tag initialization
-- Framework integrations for Angular, React, Vue and a web component
+- Local workspace integrations for Angular, React, Vue and a web component (the npm root package is framework-neutral)
 
 ## Documentation
 

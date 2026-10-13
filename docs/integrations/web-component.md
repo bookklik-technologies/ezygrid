@@ -2,6 +2,14 @@
 
 `@ezygrid/web-component` defines the `<ezy-grid>` custom element. Importing it in a browser self-registers the element; the module is SSR-safe (`defineEzyGridElement(tag)` and `createEzyGridElementClass()` are exported for custom tags).
 
+## Install
+
+The web component is a local workspace package, not a public npm package. Build the Ezygrid checkout with `pnpm install` and `pnpm build`, then run this from an app beside the checkout:
+
+```bash
+pnpm add @ezygrid/web-component@link:../ezygrid/packages/web-component @ezygrid/core@link:../ezygrid/packages/core @ezygrid/theme-default@link:../ezygrid/packages/theme-default
+```
+
 ## Usage
 
 ```html

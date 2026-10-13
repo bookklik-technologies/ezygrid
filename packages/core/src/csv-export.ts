@@ -44,6 +44,7 @@ export function worksheetFromCsv(worksheet: Worksheet, text: string, options: Fr
   const anchorRect = options.anchor ? parseRange(options.anchor) : { top: 0, left: 0, bottom: 0, right: 0 };
   // One notification transaction for the whole import: one render pass (F02).
   worksheet.workbook.beginUpdate();
+  worksheet.workbook.history.beginBatch();
   try {
     for (let r = 0; r < parsed.rows.length; r++) {
       const row = parsed.rows[r]!;
@@ -56,6 +57,7 @@ export function worksheetFromCsv(worksheet: Worksheet, text: string, options: Fr
       }
     }
   } finally {
-    worksheet.workbook.endUpdate();
+    try { worksheet.workbook.endUpdate(); }
+    finally { worksheet.workbook.history.endBatch(); }
   }
 }

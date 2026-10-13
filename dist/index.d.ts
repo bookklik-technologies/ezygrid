@@ -1466,11 +1466,8 @@ export declare class ClipboardService {
 	/** Load text copied from another application without translating its formulas. */
 	loadTSV(text: string): void;
 	/**
-	 * TSV text of the clipboard buffer (external format). TSV has no quoting
-	 * convention for special characters (M3): Excel/Sheets paste quote
-	 * characters literally, so `"` is never escaped here. Cells containing
-	 * tabs or newlines are quoted so the row structure survives round-trips
-	 * through quote-aware TSV parsers (including this service's own fromTSV).
+	 * TSV text with doubled-quote escaping for quoted fields. Literal
+	 * formula-looking text is quoted to retain its interpretation on paste.
 	 */
 	toTSV(): string;
 	/**

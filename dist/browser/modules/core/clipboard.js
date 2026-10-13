@@ -51,11 +51,8 @@ class ClipboardService {
         this.buffer = ClipboardService.fromTSV(text);
     }
     /**
-     * TSV text of the clipboard buffer (external format). TSV has no quoting
-     * convention for special characters (M3): Excel/Sheets paste quote
-     * characters literally, so `"` is never escaped here. Cells containing
-     * tabs or newlines are quoted so the row structure survives round-trips
-     * through quote-aware TSV parsers (including this service's own fromTSV).
+     * TSV text with doubled-quote escaping for quoted fields. Literal
+     * formula-looking text is quoted to retain its interpretation on paste.
      */
     toTSV() {
         if (!this.buffer)
@@ -64,7 +61,7 @@ class ClipboardService {
             .map((row) => row
             .map((cell) => {
             const text = cell.formula ?? (cell.raw === null || cell.raw === undefined ? '' : String(cell.raw));
-            return /[\t\n\r]/.test(text) ? `"${text}"` : text;
+            return /["\t\n\r]/.test(text) || cell.literal ? `"${text.replace(/"/g, '""')}"` : text;
         })
             .join('\t'))
             .join('\n');
@@ -80,10 +77,11 @@ class ClipboardService {
         let cells = [];
         let field = '';
         let quoted = false;
+        let wasQuoted = false;
         const pushField = () => {
             // A quoted field is always text; an unquoted field may become a
             // formula (spreadsheet semantics) or a number.
-            if (quoted) {
+            if (wasQuoted) {
                 cells.push({ raw: field, literal: true });
             }
             else {
@@ -92,6 +90,7 @@ class ClipboardService {
             }
             field = '';
             quoted = false;
+            wasQuoted = false;
         };
         for (let i = 0; i < normalized.length;) {
             const ch = normalized[i];
@@ -112,8 +111,9 @@ class ClipboardService {
                 }
                 continue;
             }
-            if (ch === '"') {
+            if (ch === '"' && field === '' && !wasQuoted) {
                 quoted = true;
+                wasQuoted = true;
                 i += 1;
                 continue;
             }
@@ -133,7 +133,7 @@ class ClipboardService {
             i += 1;
         }
         // Trailing row unless the text ended exactly on a newline.
-        if (field !== '' || cells.length > 0) {
+        if (field !== '' || cells.length > 0 || wasQuoted) {
             pushField();
             rows.push(cells);
         }

@@ -164,7 +164,7 @@ describe('range clamping (M2)', () => {
 });
 
 describe('TSV clipboard fidelity (M3)', () => {
-  it('does not quote-quote cells containing quote characters', () => {
+  it('escapes quotes so TSV round trips preserve text', () => {
     const clip = new ClipboardService();
     clip.buffer = {
       rows: 1,
@@ -177,7 +177,8 @@ describe('TSV clipboard fidelity (M3)', () => {
         ],
       ],
     };
-    expect(clip.toTSV()).toBe('a"b\tplain');
+    expect(clip.toTSV()).toBe('"a""b"\tplain');
+    expect(ClipboardService.fromTSV(clip.toTSV()).cells[0]![0]!.raw).toBe('a"b');
   });
 
   it('quotes cells containing tabs or newlines so row structure survives', () => {

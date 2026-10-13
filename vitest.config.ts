@@ -16,6 +16,12 @@ export default defineConfig({
     },
   },
   test: {
+    // DOM suites allocate whole editors; bound concurrency on developer machines.
+    maxWorkers: 4,
+    // Whole-editor DOM fixtures and generated-bundle hooks exceed Vitest 4's
+    // strict five-second default; performance assertions retain their own budgets.
+    testTimeout: 15_000,
+    hookTimeout: 30_000,
     // TSX suites (React) are included; browser-backed files opt in via an
     // in-file `// @vitest-environment` pragma.
     include: ['packages/*/tests/**/*.test.{ts,tsx}'],

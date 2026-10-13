@@ -8,4 +8,7 @@ catalogs:
   default:
     typescript: ^5.6.0
 overrides:
+  vite: 6.4.4
+  esbuild: 0.25.12
+  source-map-js: 1.2.2
   dts-bundle-generator>typescript: "catalog:default"

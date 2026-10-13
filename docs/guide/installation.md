@@ -1,5 +1,7 @@
 # Installation
 
+The public npm package is `@bookklik/ezygrid`. The `@ezygrid/*` packages referenced by framework guides and advanced tooling are local workspace packages. Build a cloned checkout and link those packages using the corresponding integration guide; they are not currently available on public npm.
+
 Ezygrid is a pnpm workspace monorepo. Node **>= 20** and pnpm **11** are recommended.
 
 ::: tip Next step

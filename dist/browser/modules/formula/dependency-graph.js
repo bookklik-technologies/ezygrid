@@ -82,7 +82,7 @@ class DependencyGraph {
             for (const p of existing.precedents) {
                 this.formulas.get(p)?.dependents.delete(k);
             }
-            this.unregisterRanges(k, existing.sheet);
+            this.unregisterRanges(k);
         }
         const entry = {
             sheet,
@@ -125,18 +125,29 @@ class DependencyGraph {
                 if (ownerKey === k)
                     continue;
                 if (ownerRanges.some((range) => withinRange(range, row, column))) {
-                    this.formulas.get(ownerKey)?.dependents.add(k);
-                    entry.precedents.add(ownerKey);
+                    entry.dependents.add(ownerKey);
+                    this.formulas.get(ownerKey)?.precedents.add(k);
                 }
             }
         }
         if (rangeDeps.length > 0) {
-            let bucket = this.rangesBySheet.get(sheet);
-            if (!bucket) {
-                bucket = new Map();
-                this.rangesBySheet.set(sheet, bucket);
+            for (const dependencySheet of new Set(rangeDeps.map((range) => range.sheet))) {
+                let bucket = this.rangesBySheet.get(dependencySheet);
+                if (!bucket) {
+                    bucket = new Map();
+                    this.rangesBySheet.set(dependencySheet, bucket);
+                }
+                bucket.set(k, rangeDeps.filter((range) => range.sheet === dependencySheet));
+                // Formula precedents may have been registered before their range reader.
+                for (const [precedentKey, precedent] of this.formulas) {
+                    const [precedentSheet, r, c] = splitKey(precedentKey);
+                    if (precedentKey !== k && precedentSheet === dependencySheet &&
+                        rangeDeps.some((range) => range.sheet === dependencySheet && withinRange(range, r, c))) {
+                        precedent.dependents.add(k);
+                        entry.precedents.add(precedentKey);
+                    }
+                }
             }
-            bucket.set(k, rangeDeps);
         }
         this.markDirty(k);
     }
@@ -148,7 +159,7 @@ class DependencyGraph {
         for (const p of entry.precedents) {
             this.formulas.get(p)?.dependents.delete(k);
         }
-        this.unregisterRanges(k, sheet);
+        this.unregisterRanges(k);
         this.opaqueFormulas.delete(k);
         // Keep placeholder dependents chain: dependents of this cell keep pointing at placeholder.
         if (entry.formula) {
@@ -184,20 +195,19 @@ class DependencyGraph {
             for (const d of entry.dependents) {
                 this.formulas.get(d)?.precedents.delete(k);
             }
-            this.unregisterRanges(k, entry.sheet);
+            this.unregisterRanges(k);
             this.opaqueFormulas.delete(k);
             this.dirty.delete(k);
             this.formulas.delete(k);
         }
         this.rangesBySheet.delete(sheet);
     }
-    unregisterRanges(k, sheet) {
-        const bucket = this.rangesBySheet.get(sheet);
-        if (!bucket)
-            return;
-        bucket.delete(k);
-        if (bucket.size === 0)
-            this.rangesBySheet.delete(sheet);
+    unregisterRanges(k) {
+        for (const [dependencySheet, bucket] of this.rangesBySheet) {
+            bucket.delete(k);
+            if (bucket.size === 0)
+                this.rangesBySheet.delete(dependencySheet);
+        }
     }
     /**
      * Recalculate the formula at k and all transitive dependents. The `done`
