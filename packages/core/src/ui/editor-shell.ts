@@ -4,6 +4,10 @@ import { rectToRange } from '@ezygrid/model';
 import { node, button, icon, form, type Field, type Values } from './dom.js';
 import { installEditorStyles } from './styles.js';
 import { openPanel } from './panels.js';
+import { mountLayoutRibbon, type RibbonControls } from './layout-ribbon.js';
+import { mountHeadersRibbon } from './headers-ribbon.js';
+import type { FloatingRef } from '../floating-objects.js';
+import { mountToolsRibbon, selectedTable } from './tools-ribbon.js';
 import { workbookFromXlsx, workbookToXlsx } from '../xlsx/index.js';
 import { buildPrintHtml, printHtml } from '../print.js';
 import { darkThemeTokens, defaultThemeTokens } from '../theme.js';
@@ -71,20 +75,22 @@ const commandIcons: Record<string, string> = {
 };
 
 type Group = [string, string[]];
+let shellSequence = 0;
 type ThemeChoice = 'light' | 'dark' | 'system';
 const THEME_LABELS: Record<ThemeChoice, string> = { light: 'Light', dark: 'Dark', system: 'System' };
 const ribbons: Record<string, Group[]> = {
   File: [['Workbook', ['file.new', 'file.open', 'file.save']], ['Import / export', ['file.csvImport', 'file.csvExport', 'file.xlsxExport']], ['Print', ['file.print']]],
-  Home: [['Clipboard', ['clipboard.cut', 'clipboard.copy', 'clipboard.paste']], ['History', ['edit.undo', 'edit.redo']], ['Font', ['format.bold', 'format.italic', 'format.underline']], ['Alignment', ['format.left', 'format.center', 'format.right', 'format.wrap', 'panel.format']], ['Cells', ['cells.merge', 'cells.unmerge', 'cells.fillDown', 'cells.fill', 'cells.clear', 'format.clear']], ['Find', ['panel.find']]],
-  Insert: [['Data', ['panel.tables', 'panel.charts']], ['Objects', ['panel.images', 'panel.shapes']]],
-  Layout: [['Rows and columns', ['panel.layout']], ['Headers', ['panel.headers']]],
-  Formulas: [['Functions', ['panel.functions', 'panel.names', 'formula.recalculate']]],
-  Data: [['Organize', ['panel.sort', 'panel.filters', 'filter.clear', 'panel.groups']], ['Rules', ['panel.validation', 'panel.conditional']], ['Analysis', ['panel.pivots']]],
-  Review: [['Notes', ['panel.notes', 'notes.clear']]],
-  View: [['Workbook view', ['panel.freeze', 'panel.pagination', 'view.formula', 'view.ribbon']], ['Appearance', ['view.theme', 'view.fullscreen']]],
+  Home: [['Clipboard', ['clipboard.cut', 'clipboard.copy', 'clipboard.paste']], ['History', ['edit.undo', 'edit.redo']], ['Font', ['format.bold', 'format.italic', 'format.underline']], ['Alignment', ['format.left', 'format.center', 'format.right', 'format.wrap']], ['Cells', ['cells.merge', 'cells.unmerge', 'cells.fillDown', 'cells.fill', 'cells.clear', 'format.clear']]],
+  Insert: [],
+  Layout: [],
+  Formulas: [],
+  Data: [],
+  Review: [],
+  View: [],
 };
 
 export class EditorShell {
+  private readonly id = ++shellSequence;
   readonly doc: Document;
   readonly root: HTMLElement;
   private main: HTMLElement;
@@ -95,7 +101,17 @@ export class EditorShell {
   private stats: HTMLElement;
   private filename: HTMLInputElement;
   private zoom: HTMLSelectElement;
-  private panelElement?: HTMLElement;
+  private toolElement?: HTMLDialogElement;
+  private toolCleanup?: () => void;
+  private toolValid?: () => boolean;
+  private dialogs = new Set<HTMLDialogElement>();
+  private toolControls?: RibbonControls;
+  private ribbonContext = '';
+  private lastStandardTab = 'Home';
+  private objectKey = '';
+  readonly paginationState = { enabled: false, size: 50 };
+  private layoutControls?: RibbonControls;
+  private headerControls?: RibbonControls;
   private status?: HTMLElement;
   private disposed = false;
   private unlisten: () => void;
@@ -177,23 +193,11 @@ export class EditorShell {
     this.tabBar.setAttribute('role', 'tablist');
     this.tabBar.setAttribute('aria-label', 'Ribbon');
     this.ribbon = node(this.doc, 'div', 'ezg-ribbon');
+    this.ribbon.id = `ezg-ribbon-${this.id}`;
     this.ribbon.setAttribute('role', 'toolbar');
     this.ribbon.setAttribute('aria-label', 'Spreadsheet tools');
     this.ribbon.hidden = !options.toolbar;
-    for (const title of Object.keys(ribbons)) {
-      const tab = button(this.doc, title, () => { this.setRibbonVisible(true); this.selectTab(title); });
-      tab.setAttribute('role', 'tab');
-      tab.addEventListener('keydown', (event) => {
-        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
-        event.preventDefault();
-        const titles = Object.keys(ribbons);
-        const index = titles.indexOf(title);
-        const next = event.key === 'Home' ? 0 : event.key === 'End' ? titles.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + titles.length) % titles.length;
-        this.selectTab(titles[next]!);
-        (this.tabBar.children[next] as HTMLElement).focus();
-      });
-      this.tabBar.append(tab);
-    }
+    for (const title of [...Object.keys(ribbons), 'Chart', 'Image', 'Shape', 'Table']) this.addTab(title);
     this.ribbonToggle = button(this.doc, 'Collapse ribbon', () => this.setRibbonVisible(this.ribbon.hidden), 'collapse');
     this.setRibbonVisible(options.toolbar);
     this.tabBar.append(this.ribbonToggle);
@@ -224,6 +228,7 @@ export class EditorShell {
     this.fileInput.hidden = true;
     this.fileInput.addEventListener('change', () => { void this.openFile(); });
     this.root.append(top, this.tabBar, this.ribbon, this.main, bottom, this.fileInput);
+    this.ribbon.addEventListener('focusin', event => (event.target as HTMLElement).scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
     container.append(this.root);
     this.selectTab('Home');
     this.root.addEventListener('keydown', this.onKeyDown);
@@ -232,7 +237,7 @@ export class EditorShell {
     this.refreshFullscreen();
     this.unlisten = workbook.onOperation((operation) => {
       if (operation.type === 'document.load') this.savedDocument = JSON.stringify(workbook.toJSON());
-      if (['document.load', 'worksheet.activate', 'worksheet.remove', 'undo', 'redo'].includes(operation.type)) this.closePanel();
+      if (['document.load', 'worksheet.activate', 'worksheet.remove', 'undo', 'redo'].includes(operation.type)) this.closeTransientEditors();
       this.update();
     });
   }
@@ -240,10 +245,22 @@ export class EditorShell {
   get sheet() { return this.workbook.activeWorksheet; }
   get range() { return rectToRange(this.renderer.selection.primary); }
 
-  private commandButton(id: string, icon?: string): HTMLButtonElement {
+  paginationChanged(state: { pageSize: number } | null): void {
+    this.paginationState.enabled = state !== null;
+    if (state) this.paginationState.size = state.pageSize;
+  }
+
+  setPagination(enabled: boolean, size: number): void {
+    if (enabled) this.renderer.enablePagination(size);
+    else this.renderer.disablePagination();
+    this.update();
+  }
+
+  commandButton(id: string, icon?: string, labeled = false): HTMLButtonElement {
     const command = this.renderer.commands.get(id);
     const element = button(this.doc, command?.title ?? id, () => this.execute(id), icon ?? commandIcons[id]);
     element.dataset.command = id;
+    if (labeled && element.querySelector('svg')) element.append(node(this.doc, 'span', '', command?.title ?? id));
     if (command?.shortcut) element.title += ` (${command.shortcut})`;
     return element;
   }
@@ -256,12 +273,13 @@ export class EditorShell {
     } catch (error) { this.message(error); }
   }
 
-  mutate(action: () => void): void {
+  mutate(action: () => void): boolean {
     try {
       this.renderer.commitEdits();
       this.workbook.transaction(action);
       this.renderer.render();
-    } catch (error) { this.message(error); }
+      return true;
+    } catch (error) { this.message(error); return false; }
   }
 
   style(patch: CellStyle): void { this.mutate(() => this.sheet.setStyle(this.range, patch)); }
@@ -276,8 +294,8 @@ export class EditorShell {
       execute: () => this.style({ [key]: !this.currentStyle()[key] }),
     });
     for (const align of ['left', 'center', 'right'] as const) register(`format.${align}`, align[0]!.toUpperCase() + align.slice(1), () => this.style({ align }));
-    const panels = { format: 'Cell format', find: 'Find and replace', tables: 'Tables', charts: 'Charts', images: 'Images', shapes: 'Shapes', layout: 'Rows and columns', headers: 'Nested headers', functions: 'Insert function', names: 'Defined names', sort: 'Sort', filters: 'Filters', groups: 'Row groups', validation: 'Validation', conditional: 'Conditional formatting', pivots: 'Pivot tables', notes: 'Cell note', freeze: 'Freeze panes', pagination: 'Pagination' };
-    for (const [key, title] of Object.entries(panels)) register(`panel.${key}`, title, () => openPanel(this, key), key === 'find' ? 'Mod+F' : undefined);
+    const panels = { format: 'Cell format', find: 'Find and replace', tables: 'Format as table', charts: 'Charts', images: 'Images', shapes: 'Shapes', layout: 'Rows and columns', headers: 'Grouped headers', functions: 'Insert function', names: 'Defined names', sort: 'Sort', filters: 'Filters', groups: 'Row groups', validation: 'Validation', conditional: 'Conditional formatting', pivots: 'Pivot tables', notes: 'Cell note', freeze: 'Freeze panes', pagination: 'Pagination' };
+    for (const [key, title] of Object.entries(panels)) register(`panel.${key}`, title, () => this.revealTool(key), key === 'find' ? 'Mod+F' : undefined);
     register('file.new', 'New workbook', () => { void this.replaceDocument(new Workbook().toJSON()); });
     register('file.open', 'Open workbook', () => this.chooseFile('document'), 'Mod+O');
     register('file.save', 'Save JSON', () => {
@@ -374,6 +392,7 @@ export class EditorShell {
 
   private setRibbonVisible(visible: boolean): void {
     this.ribbon.hidden = !visible;
+    this.tabBar.dataset.ribbonExpanded = String(visible);
     const label = visible ? 'Collapse ribbon' : 'Expand ribbon';
     this.ribbonToggle.replaceChildren(icon(this.doc, visible ? 'collapse' : 'chevronDown'));
     this.ribbonToggle.title = label;
@@ -381,14 +400,73 @@ export class EditorShell {
     this.ribbonToggle.setAttribute('aria-expanded', String(visible));
   }
 
+  private addTab(title: string): void {
+    const tab = button(this.doc, title, () => this.showRibbon(title));
+    tab.setAttribute('role', 'tab');
+    tab.id = `ezg-tab-${this.id}-${title.toLowerCase()}`;
+    tab.setAttribute('aria-controls', this.ribbon.id);
+    tab.dataset.tab = title;
+    tab.hidden = !(title in ribbons);
+    tab.addEventListener('keydown', event => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+      event.preventDefault();
+      const tabs = [...this.tabBar.querySelectorAll<HTMLButtonElement>('[role=tab]')].filter(item => !item.hidden);
+      const index = tabs.indexOf(tab);
+      const forward = (event.key === 'ArrowRight') !== (this.root.dir === 'rtl');
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (forward ? 1 : -1) + tabs.length) % tabs.length;
+      this.showRibbon(tabs[next]!.dataset.tab!);
+      tabs[next]!.focus();
+    });
+    tab.addEventListener('focus', () => tab.scrollIntoView?.({ block: 'nearest', inline: 'nearest' }));
+    this.tabBar.append(tab);
+  }
+
+  showRibbon(title: string, label?: string): void {
+    this.setRibbonVisible(true);
+    if (this.activeTab !== title) this.selectTab(title);
+    const control = label ? [...this.ribbon.querySelectorAll<HTMLElement>('[aria-label]')].find(item => item.getAttribute('aria-label') === label) : undefined;
+    const target = control?.matches(':disabled') ? control.closest<HTMLElement>('[role=group]') : control;
+    if (target) {
+      if (target.getAttribute('role') === 'group') target.tabIndex = -1;
+      target.focus({ preventScroll: true });
+    }
+  }
+
+  private revealTool(name: string): void {
+    const routes: Record<string, [string, string]> = {
+      layout: ['Layout', 'Insert above'], headers: ['Layout', 'Add header level'],
+      find: ['Home', 'Find'], functions: ['Formulas', 'Search functions'],
+      filters: ['Data', 'Filter condition'], groups: ['Data', 'Group rows'],
+      notes: ['Review', 'Note'], freeze: ['View', 'Leading rows'], pagination: ['View', 'Enable pagination'],
+    };
+    const route = routes[name];
+    if (route) this.showRibbon(...route);
+    else openPanel(this, name);
+  }
+
+  private contextSignature(): string {
+    const ref = this.renderer.objects.selected;
+    return `${this.sheet.id}:${ref?.kind ?? ''}:${ref?.id ?? ''}:${selectedTable(this)?.id ?? ''}`;
+  }
+
   private selectTab(title: string): void {
+    this.layoutControls?.destroy(); this.layoutControls = undefined;
+    this.headerControls?.destroy(); this.headerControls = undefined;
+    this.toolControls?.destroy(); this.toolControls = undefined;
     this.activeTab = title;
+    if (title in ribbons) this.lastStandardTab = title;
+    this.ribbonContext = this.contextSignature();
     for (const tab of this.tabBar.querySelectorAll<HTMLButtonElement>('[role=tab]')) {
       tab.setAttribute('aria-selected', String(tab.textContent === title));
       tab.tabIndex = tab.textContent === title ? 0 : -1;
+      if (tab.textContent === title) this.ribbon.setAttribute('aria-labelledby', tab.id);
     }
     this.ribbon.replaceChildren();
-    for (const [name, commands] of ribbons[title]!) {
+    if (title === 'Layout') {
+      this.layoutControls = mountLayoutRibbon(this, this.ribbon);
+      this.headerControls = mountHeadersRibbon(this, this.ribbon);
+    }
+    for (const [name, commands] of ribbons[title] ?? []) {
       const group = node(this.doc, 'div', 'ezg-group');
       const controls = node(this.doc, 'div', 'ezg-controls');
       if (title === 'Home' && name === 'Font') {
@@ -403,7 +481,7 @@ export class EditorShell {
         size.addEventListener('change', () => { if (size.reportValidity()) this.style({ fontSize: Number(size.value) }); });
         controls.append(font, size);
       }
-      for (const id of commands) controls.append(this.commandButton(id));
+      for (const id of commands) controls.append(this.commandButton(id, undefined, title === 'File'));
       if (title === 'Home' && name === 'Font') {
         for (const [key, label, value] of [['color', 'Text color', '#0f172a'], ['background', 'Fill color', '#ffffff']]) {
           const color = node(this.doc, 'input'); color.type = 'color'; color.value = value!;
@@ -414,11 +492,40 @@ export class EditorShell {
       group.append(controls, node(this.doc, 'span', 'ezg-group-label', name));
       this.ribbon.append(group);
     }
+    this.toolControls = mountToolsRibbon(this, this.ribbon, title);
+    this.ribbon.scrollLeft = 0;
     this.update();
+    this.tabBar.querySelector<HTMLButtonElement>('[aria-selected=true]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }
 
   update(): void {
     if (this.disposed) return;
+    const selected = this.renderer.objects.selected;
+    if (selected && (selected.worksheetId !== this.sheet.id || !this.renderer.objects.get(selected))) {
+      this.renderer.objects.select(null);
+      return;
+    }
+    if (this.toolValid && !this.toolValid()) this.closeToolDialog();
+    const ref = this.renderer.objects.selected;
+    const table = selectedTable(this);
+    for (const tab of this.tabBar.querySelectorAll<HTMLButtonElement>('[role=tab]')) {
+      const title = tab.dataset.tab!;
+      tab.hidden = !(title in ribbons) && !(title === 'Table' ? table : ref?.kind === title.toLowerCase());
+    }
+    if (this.ribbonContext !== this.contextSignature()) {
+      const active = this.tabBar.querySelector<HTMLButtonElement>('[aria-selected=true]');
+      const changedSheet = !this.ribbonContext.startsWith(`${this.sheet.id}:`);
+      if (!(this.activeTab in ribbons) || changedSheet) {
+        const focused = this.doc.activeElement;
+        const restoreFocus = this.ribbon.contains(focused) || this.tabBar.contains(focused);
+        this.selectTab(active?.hidden ? this.lastStandardTab : this.activeTab);
+        if (restoreFocus && (active?.hidden || !focused?.isConnected)) this.tabBar.querySelector<HTMLButtonElement>('[aria-selected=true]')?.focus({ preventScroll: true });
+        return;
+      }
+      this.ribbonContext = this.contextSignature();
+    }
+    this.layoutControls?.refresh(); this.headerControls?.refresh();
+    this.toolControls?.refresh();
     if (this.doc.activeElement !== this.filename) this.filename.value = this.workbook.filename;
     const context = { workbook: this.workbook, worksheet: this.sheet, selection: this.renderer.selection };
     for (const element of this.root.querySelectorAll<HTMLButtonElement>('[data-command]')) {
@@ -472,19 +579,74 @@ export class EditorShell {
     });
   }
 
-  panel(title: string): HTMLElement {
-    this.closePanel();
-    const panel = node(this.doc, 'aside', 'ezg-panel');
+  showLayoutControls(headers = false): void {
+    this.setRibbonVisible(true);
+    if (this.activeTab !== 'Layout') this.selectTab('Layout');
+    const control = headers ? this.ribbon.querySelector<HTMLButtonElement>('[aria-label="Add header level"]') : this.ribbon.querySelector<HTMLButtonElement>('[aria-label="Insert above"]');
+    control?.focus({ preventScroll: true });
+  }
+
+  toolDialog(title: string, valid: () => boolean = () => true): HTMLDialogElement {
+    const opener = this.doc.activeElement as HTMLElement | null;
+    this.closeToolDialog();
+    const sheetId = this.sheet.id;
+    const panel = node(this.doc, 'dialog', 'ezg-dialog ezg-tool-dialog');
     panel.setAttribute('aria-label', title);
     const header = node(this.doc, 'header');
-    header.append(node(this.doc, 'h2', '', title), button(this.doc, 'Close panel', () => this.closePanel(), 'close'));
+    header.append(node(this.doc, 'h2', '', title), button(this.doc, 'Close dialog', () => this.closeToolDialog(), 'close'));
     panel.append(header);
-    this.main.append(panel);
-    this.panelElement = panel;
+    this.root.append(panel);
+    this.toolElement = panel;
+    this.toolValid = () => this.sheet.id === sheetId && valid();
+    panel.addEventListener('cancel', event => { event.preventDefault(); this.closeToolDialog(); });
+    panel.addEventListener('close', () => {
+      if (this.toolElement === panel) this.closeToolDialog();
+    });
+    panel.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && !event.defaultPrevented) { event.preventDefault(); event.stopPropagation(); this.closeToolDialog(); }
+    });
+    panel.showModal();
+    queueMicrotask(() => {
+      if (this.toolElement === panel && panel.querySelector('header')?.contains(this.doc.activeElement)) {
+        panel.querySelector<HTMLElement>(':scope > :not(header) input:not([type=hidden]), :scope > :not(header) select, :scope > :not(header) textarea, :scope > :not(header) button')?.focus({ preventScroll: true });
+      }
+    });
+    this.toolCleanup = () => { if (!this.disposed && opener?.isConnected) opener.focus({ preventScroll: true }); };
     return panel;
   }
 
-  closePanel(): void { this.panelElement?.remove(); this.panelElement = undefined; }
+  setToolCleanup(cleanup: () => void): void {
+    const previous = this.toolCleanup;
+    this.toolCleanup = () => { cleanup(); previous?.(); };
+  }
+
+  inspectObject(ref: FloatingRef | null): void {
+    const key = ref ? `${ref.worksheetId}:${ref.kind}:${ref.id}` : '';
+    const changed = key !== this.objectKey;
+    this.objectKey = key;
+    if (changed && ref) {
+      this.closeToolDialog();
+      this.setRibbonVisible(true);
+      this.selectTab(ref.kind[0]!.toUpperCase() + ref.kind.slice(1));
+    } else this.update();
+  }
+
+  closeToolDialog(): void {
+    const cleanup = this.toolCleanup;
+    this.toolCleanup = undefined;
+    const panel = this.toolElement;
+    this.toolElement = undefined;
+    this.toolValid = undefined;
+    if (panel?.open) panel.close();
+    panel?.remove();
+    cleanup?.();
+  }
+
+  private closeTransientEditors(): void {
+    this.closeToolDialog();
+    for (const dialog of this.dialogs) { dialog.close(); dialog.remove(); }
+    this.dialogs.clear();
+  }
 
   dialog(title: string, fields: Field[], apply: (values: Values) => void, label = 'Apply'): void {
     const dialog = node(this.doc, 'dialog', 'ezg-dialog');
@@ -495,7 +657,9 @@ export class EditorShell {
     content.append(button(this.doc, 'Cancel', () => dialog.close()));
     dialog.append(node(this.doc, 'h2', '', title), content);
     this.root.append(dialog);
-    dialog.addEventListener('close', () => { dialog.remove(); this.renderer.focus(); }, { once: true });
+    const opener = this.doc.activeElement as HTMLElement | null;
+    this.dialogs.add(dialog);
+    dialog.addEventListener('close', () => { this.dialogs.delete(dialog); dialog.remove(); if (!this.disposed) { if (opener?.isConnected) opener.focus({ preventScroll: true }); else this.renderer.focus(); } }, { once: true });
     dialog.showModal();
   }
 
@@ -523,7 +687,8 @@ export class EditorShell {
     this.status = node(this.doc, 'div', 'ezg-message');
     this.status.setAttribute('role', 'status');
     this.status.append(node(this.doc, 'span', '', error instanceof Error ? error.message : String(error)), button(this.doc, 'Dismiss', () => this.status?.remove(), 'close'));
-    this.root.append(this.status);
+    const dialog = [...this.dialogs].reverse().find(item => item.open) ?? (this.toolElement?.open ? this.toolElement : undefined);
+    (dialog ?? this.root).append(this.status);
   }
 
   private chooseFile(kind: 'document' | 'csv'): void {
@@ -565,7 +730,7 @@ export class EditorShell {
   }
 
   private onKeyDown = (event: KeyboardEvent): void => {
-    if (event.key === 'Escape' && this.panelElement && !(event.target as HTMLElement).closest('dialog')) { this.closePanel(); this.renderer.focus(); return; }
+    if ((event.target as HTMLElement).closest('dialog')) return;
     if ((event.target as HTMLElement).closest('input,textarea,select,[contenteditable=true]')) return;
     if (event.defaultPrevented) return;
     const command = this.renderer.commands.matchShortcut(event);
@@ -575,6 +740,9 @@ export class EditorShell {
 
   destroy(): void {
     this.disposed = true;
+    this.layoutControls?.destroy(); this.headerControls?.destroy();
+    this.toolControls?.destroy();
+    this.closeTransientEditors();
     this.unlisten();
     this.topbarCleanup();
     this.themeMenuCleanup();

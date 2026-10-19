@@ -10,14 +10,16 @@ function mount(options: Partial<EzygridOptions> = {}) {
   editors.push(editor); return editor;
 }
 function click(editor: Ezygrid, label: string) {
-  const element = [...editor.target.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.getAttribute('aria-label') === label);
+  const scope = editor.target.querySelector('dialog[open]') ?? editor.target;
+  const element = [...scope.querySelectorAll<HTMLButtonElement>('button')].find((item) => item.getAttribute('aria-label') === label);
   expect(element, label).toBeDefined(); element!.click();
 }
 function field(editor: Ezygrid, name: string, value: string) {
-  const control = editor.target.querySelector<HTMLInputElement>(`[name="${name}"]`)!;
+  const scope = editor.target.querySelector('dialog[open]') ?? editor.target;
+  const control = scope.querySelector<HTMLInputElement>(`[name="${name}"]`)!;
   expect(control, name).not.toBeNull(); control.value = value;
 }
-function submit(editor: Ezygrid) { editor.target.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); }
+function submit(editor: Ezygrid) { (editor.target.querySelector('dialog[open]') ?? editor.target).querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); }
 afterEach(() => { editors.splice(0).forEach((editor) => editor.destroy()); document.body.replaceChildren(); vi.restoreAllMocks(); });
 
 describe('full editor suite', () => {
@@ -44,7 +46,7 @@ describe('full editor suite', () => {
 
   it('switches sheets, restores selection, and updates plugin context', () => {
     const disposed = vi.fn(); const setup = vi.fn(() => disposed);
-    const editor = mount({ extensions: [{ name: 'observer', setup }] });
+    const editor = mount({ extensions: [{ name: 'observer', version: '1.0.0', setup }] });
     const first = editor.workbook.activeWorksheet;
     editor.renderer.navigateToAddress('B3');
     click(editor, 'Add worksheet');
@@ -74,8 +76,8 @@ describe('full editor suite', () => {
 
   it('keeps editor inputs separate from spreadsheet shortcuts', () => {
     const editor = mount();
-    click(editor, 'Find and replace');
-    const query = editor.target.querySelector<HTMLInputElement>('[name=query]')!;
+    click(editor, 'Replace options');
+    const query = editor.target.querySelector<HTMLInputElement>('dialog[open] [name=query]')!;
     query.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true, cancelable: true }));
     expect(editor.workbook.activeWorksheet.getValue(0, 0)).toBe('Category');
     field(editor, 'query', 'A'); field(editor, 'replacement', 'Changed'); field(editor, 'action', 'Replace all'); submit(editor);
@@ -103,7 +105,10 @@ describe('full editor suite', () => {
     const editor = mount(); click(editor, 'Data'); click(editor, 'Conditional formatting'); click(editor, 'Add rule');
     field(editor, 'range', 'B2:B3'); field(editor, 'value', '3'); submit(editor);
     expect(editor.workbook.activeWorksheet.conditionalFormats.evaluate(editor.workbook.activeWorksheet, 2, 1).background).toBe('#e6fff4');
-    click(editor, 'Filters'); field(editor, 'column', '2'); field(editor, 'operator', 'gt'); field(editor, 'value', '2'); submit(editor);
+    click(editor, 'Close dialog'); editor.renderer.navigateToAddress('B1');
+    const condition = editor.target.querySelector<HTMLSelectElement>('[aria-label="Filter condition"]')!;
+    condition.value = 'gt'; condition.dispatchEvent(new Event('change', { bubbles: true }));
+    field(editor, 'filter-value', '2'); click(editor, 'Apply filter');
     const restored = Workbook.fromJSON(editor.workbook.toJSON());
     expect(restored.activeWorksheet.isRowHidden(1)).toBe(true);
     expect(restored.activeWorksheet.isRowHidden(2)).toBe(false);

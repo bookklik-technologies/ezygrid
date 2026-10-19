@@ -201,9 +201,11 @@ function installSuiteTopbar(root, bar, parts) {
 /** Accessible transient menus used by the grid and design editor topbars. */
 function openSuiteMenu(anchor, items) {
     const doc = anchor.ownerDocument;
-    const bar = anchor.closest('.ezy-suite-topbar');
+    const bar = anchor.closest('.ezy-suite-topbar') ?? anchor.closest('.ezygrid-suite');
     const panel = doc.createElement('div');
     panel.className = 'ezy-suite-popup ezy-suite-transient';
+    if (!bar.classList.contains('ezy-suite-topbar'))
+        panel.classList.add('ezg-ribbon-menu');
     panel.setAttribute('popover', 'manual');
     panel.setAttribute('role', 'menu');
     panel.setAttribute('aria-label', anchor.getAttribute('aria-label') || anchor.title || 'Actions');

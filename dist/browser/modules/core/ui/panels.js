@@ -8,8 +8,22 @@ const search_js_1 = require("../search.js");
 const replace_js_1 = require("../replace.js");
 const sort_js_1 = require("../sort.js");
 const fill_js_1 = require("../fill.js");
-const formula_1 = require("@ezygrid/formula");
+const object_panel_js_1 = require("./object-panel.js");
+const table_panel_js_1 = require("./table-panel.js");
+const ribbon_actions_js_1 = require("./ribbon-actions.js");
 function openPanel(host, name) {
+    if (name === 'layout' || name === 'headers') {
+        host.showLayoutControls(name === 'headers');
+        return;
+    }
+    if (name === 'tables') {
+        (0, table_panel_js_1.openTablePanel)(host);
+        return;
+    }
+    if (name === 'charts' || name === 'images' || name === 'shapes') {
+        (0, object_panel_js_1.openObjectPanel)(host, name === 'charts' ? 'chart' : name === 'images' ? 'image' : 'shape');
+        return;
+    }
     const { doc, renderer } = host;
     const sheet = host.sheet;
     const selection = renderer.selection.primary;
@@ -19,12 +33,7 @@ function openPanel(host, name) {
     const check = (key, label, value = false) => ({ key, label, value, type: 'checkbox' });
     const pick = (key, label, options, value = options[0]) => ({ key, label, options, value });
     const range = (value = host.range) => text('range', 'Cell range', value, true);
-    const validateRange = (value) => {
-        const rect = (0, model_1.parseRange)(value);
-        if (rect.top < 0 || rect.left < 0 || rect.bottom >= sheet.rowCount || rect.right >= sheet.columnCount)
-            throw new Error('Range is outside this worksheet.');
-        return rect;
-    };
+    const validateRange = (value) => (0, ribbon_actions_js_1.checkedRange)(sheet, value);
     const attach = (panel, fields, apply, label = 'Apply') => {
         const content = (0, dom_js_1.form)(doc, fields, (v) => {
             try {
@@ -51,37 +60,27 @@ function openPanel(host, name) {
         for (const child of Array.from(extra.children))
             target.insertBefore(child, target.querySelector('[type=submit]'));
     };
-    if (name === 'format') {
+    if (name === 'format' || name === 'borders') {
+        const bordersOnly = name === 'borders';
         const style = sheet.getStyle(active.row, active.column) ?? {};
-        const panel = host.panel('Cell format');
-        attach(panel, [range(), pick('vertical', 'Vertical alignment', ['top', 'middle', 'bottom'], style.verticalAlign ?? 'top'),
+        const panel = host.toolDialog(bordersOnly ? 'Border options' : 'Cell format');
+        const formats = bordersOnly ? [] : [pick('vertical', 'Vertical alignment', ['top', 'middle', 'bottom'], style.verticalAlign ?? 'top'),
             pick('number', 'Number format', ['General', '0', '0.00', '#,##0.00', '0%', '0.00%', '$#,##0.00', 'yyyy-mm-dd', 'Custom'], sheet.getNumberFormat(active.row, active.column) ?? 'General'),
-            text('mask', 'Custom number format'), pick('border', 'Borders', ['Keep existing', 'All', 'Outside', 'Top', 'Right', 'Bottom', 'Left', 'None']),
+            text('mask', 'Custom number format')];
+        attach(panel, [range(), ...formats, pick('border', 'Borders', ['Keep existing', 'All', 'Outside', 'Top', 'Right', 'Bottom', 'Left', 'None'], bordersOnly ? 'All' : 'Keep existing'),
             { key: 'color', label: 'Border color', type: 'color', value: '#64748b' }, num('width', 'Border width', 1, 1, 8),
             pick('line', 'Border style', ['solid', 'dashed', 'dotted']),
         ], (v) => host.mutate(() => {
-            const rect = validateRange(v.range);
-            sheet.setStyle(v.range, { verticalAlign: v.vertical });
-            sheet.setNumberFormat(v.range, v.number === 'Custom' ? v.mask : v.number);
-            if (v.border !== 'Keep existing') {
-                for (let row = rect.top; row <= rect.bottom; row++)
-                    for (let column = rect.left; column <= rect.right; column++) {
-                        const borders = { ...sheet.getStyle(row, column)?.borders };
-                        for (const edge of ['top', 'right', 'bottom', 'left']) {
-                            const outside = edge === 'top' ? row === rect.top : edge === 'bottom' ? row === rect.bottom : edge === 'left' ? column === rect.left : column === rect.right;
-                            if (v.border === 'None')
-                                borders[edge] = null;
-                            else if (v.border === 'All' || (v.border === 'Outside' && outside) || v.border.toLowerCase() === edge) {
-                                borders[edge] = { width: Number(v.width), style: v.line, color: v.color };
-                            }
-                        }
-                        sheet.setStyle((0, model_1.toA1)(row, column), { borders });
-                    }
+            if (!bordersOnly) {
+                sheet.setStyle(v.range, { verticalAlign: v.vertical });
+                sheet.setNumberFormat(v.range, v.number === 'Custom' ? v.mask : v.number);
             }
+            if (v.border !== 'Keep existing')
+                (0, ribbon_actions_js_1.applyBorders)(sheet, v.range, v.border, v.color, Number(v.width), v.line);
         }));
     }
     else if (name === 'find') {
-        const panel = host.panel('Find and replace');
+        const panel = host.toolDialog('Find and replace');
         let nextIndex = 0;
         const fields = [text('query', 'Find', '', true), text('replacement', 'Replace with'), check('matchCase', 'Match case'), check('wholeCell', 'Match entire cell'), check('searchFormulas', 'Search formula text'), pick('action', 'Action', ['Find next', 'Replace next', 'Replace all'])];
         attach(panel, fields, (v) => {
@@ -107,82 +106,8 @@ function openPanel(host, name) {
                 });
         }, 'Run');
     }
-    else if (name === 'layout') {
-        const panel = host.panel('Rows and columns');
-        attach(panel, [pick('axis', 'Apply to', ['Rows', 'Columns']), pick('action', 'Action', ['Insert before', 'Delete', 'Resize', 'Auto-fit', 'Hide', 'Show']), num('start', 'Starting index (1-based)', active.row + 1, 1), num('count', 'Count', 1, 1), num('size', 'Size in pixels', 24, 1, 2000)], (v) => host.mutate(() => {
-            const rows = v.axis === 'Rows';
-            const index = Number(v.start) - 1;
-            const count = Number(v.count);
-            const limit = rows ? sheet.rowCount : sheet.columnCount;
-            if (index + count > limit)
-                throw new Error('The requested rows or columns exceed the worksheet.');
-            if (v.action === 'Insert before') {
-                if (rows)
-                    sheet.insertRows(index, count);
-                else
-                    sheet.insertColumns(index, count);
-            }
-            else if (v.action === 'Delete') {
-                if (rows)
-                    sheet.deleteRows(index, count);
-                else
-                    sheet.deleteColumns(index, count);
-            }
-            else if (v.action === 'Hide') {
-                if (rows)
-                    sheet.hideRows(index, count);
-                else
-                    sheet.hideColumns(index, count);
-            }
-            else if (v.action === 'Show') {
-                if (rows)
-                    sheet.showRows(index, count);
-                else
-                    sheet.showColumns(index, count);
-            }
-            else {
-                const canvas = doc.createElement('canvas');
-                const context = canvas.getContext('2d');
-                for (let i = index; i < index + count; i++) {
-                    let size = Number(v.size);
-                    if (v.action === 'Auto-fit') {
-                        size = rows ? 24 : 40;
-                        sheet.cells.forEach((row, column) => {
-                            if ((rows ? row : column) !== i)
-                                return;
-                            const style = sheet.getStyle(row, column) ?? {};
-                            const fontSize = style.fontSize ?? 13;
-                            if (context)
-                                context.font = `${style.bold ? 'bold ' : ''}${fontSize}px ${style.fontFamily ?? 'Outfit'}`;
-                            const value = String(sheet.getValue(row, column) ?? '');
-                            const lines = value.split('\n');
-                            const width = Math.max(...lines.map((line) => context?.measureText(line).width ?? line.length * fontSize * .6));
-                            size = Math.max(size, rows ? Math.max(lines.length, style.wrap ? Math.ceil(width / Math.max(1, sheet.columnSizes.sizeOf(column) - 12)) : 1) * fontSize * 1.45 + 4 : width + 16);
-                        });
-                    }
-                    (rows ? sheet.rowSizes : sheet.columnSizes).setSize(i, Math.min(2000, Math.ceil(size)));
-                }
-            }
-        }));
-    }
-    else if (name === 'headers') {
-        const panel = host.panel('Nested headers');
-        panel.append((0, dom_js_1.node)(doc, 'p', 'ezg-hint', 'One header level per line. Separate labels with commas. Add :2 after a label to span two columns. Leave blank to remove.'));
-        attach(panel, [{ key: 'levels', label: 'Header levels', type: 'textarea', value: sheet.nestedHeaders.map((level) => level.map((item) => typeof item === 'string' ? item : `${item.title}:${item.span}`).join(', ')).join('\n') }], (v) => host.mutate(() => {
-            const levels = v.levels.trim() ? v.levels.split('\n').map((line) => line.split(',').map((item) => {
-                const match = /^(.*):(\d+)$/.exec(item.trim());
-                if (!match)
-                    return item.trim();
-                const span = Number(match[2]);
-                if (span < 1)
-                    throw new Error('Header spans must be positive.');
-                return { title: match[1], span };
-            })) : [];
-            sheet.setNestedHeaders(levels);
-        }));
-    }
     else if (name === 'sort') {
-        const panel = host.panel('Sort');
+        const panel = host.toolDialog('Sort');
         const columns = Array.from({ length: sheet.columnCount }, (_, i) => (0, model_1.toA1)(0, i).replace(/1$/, ''));
         const fields = [range(), check('header', 'First row is a header', true)];
         let sortCount = 1;
@@ -204,107 +129,27 @@ function openPanel(host, name) {
         }), 'Sort');
         panel.append((0, dom_js_1.button)(doc, 'Add sort level', () => addFields(sortForm, sortFields(sortCount++))));
     }
-    else if (name === 'filters') {
-        const panel = host.panel('Filters');
-        list(panel, [...sheet.filters.keys()].map((column) => ({ label: `Remove filter: ${(0, model_1.toA1)(0, column).replace(/1$/, '')}`, run: () => { host.mutate(() => sheet.clearFilter(column)); openPanel(host, name); } })));
-        attach(panel, [num('column', 'Column number', active.column + 1, 1, sheet.columnCount), pick('operator', 'Condition', ['equals', 'contains', 'gt', 'lt', 'notEmpty']), text('value', 'Value')], (v) => {
-            host.mutate(() => sheet.setFilterCriteria(Number(v.column) - 1, { operator: v.operator, value: v.value }));
-            openPanel(host, name);
-        });
-    }
-    else if (name === 'groups') {
-        const panel = host.panel('Row groups');
-        list(panel, sheet.getGroups().flatMap((group) => [
-            { label: `${group.collapsed ? 'Expand' : 'Collapse'} rows ${group.start + 1}–${group.end + 1}`, run: () => { host.mutate(() => group.collapsed ? sheet.expandGroup(group.start) : sheet.collapseGroup(group.start)); openPanel(host, name); } },
-            { label: `Ungroup rows ${group.start + 1}–${group.end + 1}`, run: () => { host.mutate(() => sheet.ungroupRows(group.start)); openPanel(host, name); } },
-        ]));
-        attach(panel, [num('start', 'First row', selection.top + 1, 1, sheet.rowCount), num('end', 'Last row', selection.bottom + 1, 1, sheet.rowCount)], (v) => {
-            if (Number(v.end) < Number(v.start))
-                throw new Error('Last row must follow first row.');
-            host.mutate(() => sheet.groupRows(Number(v.start) - 1, Number(v.end) - 1));
-            openPanel(host, name);
-        }, 'Group rows');
-    }
-    else if (name === 'notes') {
-        const panel = host.panel('Cell note');
-        attach(panel, [range(), { key: 'note', label: 'Note', type: 'textarea', value: sheet.getNote(active.row, active.column) ?? '' }], (v) => host.mutate(() => v.note ? sheet.setNote(v.range, v.note) : sheet.clearNote(v.range)));
-    }
-    else if (name === 'freeze') {
-        const panel = host.panel('Freeze panes');
-        attach(panel, [num('rows', 'Leading rows', sheet.freezeRows, 0, sheet.rowCount), num('columns', 'Leading columns', sheet.freezeColumns, 0, sheet.columnCount)], (v) => {
-            sheet.freezeRows = Number(v.rows);
-            sheet.freezeColumns = Number(v.columns);
-        });
-    }
-    else if (name === 'pagination') {
-        const panel = host.panel('Pagination');
-        attach(panel, [check('enabled', 'Enable pagination', renderer.getPageCount() > 1), num('size', 'Rows per page', 50, 1, sheet.rowCount), num('page', 'Page', renderer.getPage() + 1, 1)], (v) => {
-            if (v.enabled === 'true') {
-                renderer.enablePagination(Number(v.size));
-                renderer.setPage(Number(v.page) - 1);
-            }
-            else
-                renderer.disablePagination();
-        });
-        const actions = (0, dom_js_1.node)(doc, 'div', 'ezg-actions');
-        actions.append((0, dom_js_1.button)(doc, 'Previous page', () => renderer.setPage(renderer.getPage() - 1)), (0, dom_js_1.button)(doc, 'Next page', () => renderer.setPage(renderer.getPage() + 1)));
-        panel.append(actions);
-    }
     else if (name === 'fill') {
-        const panel = host.panel('Fill series');
+        const panel = host.toolDialog('Fill series');
         attach(panel, [text('source', 'Seed range', host.range, true), text('target', 'Fill range (including seed)', host.range, true)], (v) => host.mutate(() => new fill_js_1.FillService().fillRange(sheet, validateRange(v.source), validateRange(v.target))));
     }
-    else if (name === 'functions') {
-        const panel = host.panel('Insert function');
-        const search = (0, dom_js_1.node)(doc, 'input');
-        search.placeholder = 'Search functions';
-        search.setAttribute('aria-label', 'Search functions');
-        const entries = (0, dom_js_1.node)(doc, 'div', 'ezg-list');
-        panel.append(search, entries);
-        const render = () => {
-            entries.replaceChildren();
-            for (const meta of formula_1.formulaRegistry.all().filter((fn) => `${fn.name} ${fn.description}`.toLowerCase().includes(search.value.toLowerCase()))) {
-                const item = (0, dom_js_1.button)(doc, meta.name, () => { host.closePanel(); renderer.insertFormula(`=${meta.name}(`); });
-                item.title = meta.description ?? meta.name;
-                entries.append(item);
-            }
-        };
-        search.addEventListener('input', render);
-        render();
-    }
     else if (name === 'names') {
-        const panel = host.panel('Defined names');
+        const panel = host.toolDialog('Defined names');
         list(panel, [...host.workbook.definedNames].map(([key]) => ({ label: `Remove ${key}`, run: () => { host.mutate(() => host.workbook.removeDefinedName(key)); openPanel(host, name); } })));
         attach(panel, [text('name', 'Name', '', true), pick('kind', 'Type', ['Range', 'Value']), text('value', 'Range reference or constant', host.range, true)], (v) => {
             host.mutate(() => host.workbook.setDefinedName(v.name, v.kind === 'Range' ? { type: 'range', ref: v.value } : { type: 'value', value: v.value !== '' && Number.isFinite(Number(v.value)) ? Number(v.value) : v.value }));
             openPanel(host, name);
         }, 'Save name');
     }
-    else if (name === 'tables') {
-        const panel = host.panel('Tables');
-        const edit = (table) => {
-            const target = host.panel(table ? 'Edit table' : 'Create table');
-            attach(target, [text('name', 'Table name', table?.name ?? `Table${sheet.tables.all().length + 1}`, true), range(table ? (0, model_1.rectToRange)(table.range) : undefined), check('header', 'Header row', table?.headerRow ?? true), check('total', 'Total row', table?.totalRow)], (v) => {
-                host.mutate(() => { if (table)
-                    sheet.tables.remove(table.name); sheet.addTable({ name: v.name, range: v.range, headerRow: v.header === 'true', totalRow: v.total === 'true' }); });
-                openPanel(host, name);
-            }, table ? 'Update table' : 'Create table');
-        };
-        list(panel, sheet.tables.all().flatMap((table) => [
-            { label: `${table.name} (${(0, model_1.rectToRange)(table.range)})`, run: () => edit(table) },
-            { label: `Remove ${table.name}`, run: () => { host.mutate(() => sheet.tables.remove(table.name)); openPanel(host, name); } },
-        ]));
-        panel.append((0, dom_js_1.button)(doc, 'Create table', () => edit()));
-    }
     else if (name === 'validation') {
-        const panel = host.panel('Validation');
+        const panel = host.toolDialog('Validation');
         const edit = (id) => {
             const rule = sheet.validations.all().find((item) => item.id === id);
             if (rule?.predicate) {
                 host.message('This custom validator is supplied by the host application.');
                 return;
             }
-            const target = host.panel(rule ? 'Edit validation' : 'Validation');
+            const target = host.toolDialog(rule ? 'Edit validation' : 'Validation', () => !id || sheet.validations.all().some(item => item.id === id));
             attach(target, [range(rule?.range), pick('type', 'Rule', ['number', 'list', 'textLength'], rule?.type ?? 'number'),
                 pick('action', 'Invalid values', ['reject', 'warning', 'mark'], rule?.action ?? 'reject'),
                 text('min', 'Minimum (optional)', rule?.min?.toString()), text('max', 'Maximum (optional)', rule?.max?.toString()),
@@ -334,13 +179,13 @@ function openPanel(host, name) {
             panel.append((0, dom_js_1.node)(doc, 'p', 'ezg-hint', `Cell editors in this sheet: ${[...editors].join(', ')}`));
     }
     else if (name === 'conditional') {
-        const panel = host.panel('Conditional formatting');
+        const panel = host.toolDialog('Conditional formatting');
         const edit = (rule) => {
             if (rule?.predicate) {
                 host.message('This expression rule is supplied by the host application.');
                 return;
             }
-            const target = host.panel(rule ? 'Edit conditional format' : 'Conditional format');
+            const target = host.toolDialog(rule ? 'Edit conditional format' : 'Conditional format', () => !rule || sheet.conditionalFormats.all().some(item => item.id === rule.id));
             attach(target, [range(rule?.range), pick('type', 'Condition', ['cellIs', 'containsText', 'topN', 'duplicates'], rule?.type ?? 'cellIs'), pick('operator', 'Comparison', ['gt', 'lt', 'gte', 'lte', 'eq', 'neq'], rule?.operator ?? 'gt'), text('value', 'Value or text', String(rule?.text ?? rule?.value ?? '')), num('n', 'Top count', rule?.n ?? 10, 1), num('priority', 'Priority (lower first)', rule?.priority ?? 0), check('stop', 'Stop if true', rule?.stopIfTrue), { key: 'color', label: 'Text color', type: 'color', value: rule?.style.color ?? '#00674a' }, { key: 'background', label: 'Fill color', type: 'color', value: rule?.style.background ?? '#e6fff4' }, check('bold', 'Bold', rule?.style.bold)], (v) => {
                 host.mutate(() => {
                     if (rule)
@@ -356,31 +201,10 @@ function openPanel(host, name) {
         ]));
         panel.append((0, dom_js_1.button)(doc, 'Add rule', () => edit()));
     }
-    else if (name === 'charts') {
-        const panel = host.panel('Charts');
-        const edit = (chart) => {
-            const target = host.panel(chart ? 'Edit chart' : 'Insert chart');
-            attach(target, [range(chart?.source), pick('type', 'Chart type', ['column', 'bar', 'line', 'pie', 'doughnut'], chart?.type ?? 'column'), text('title', 'Title', chart?.title), check('header', 'First row contains headers', chart?.firstRowIsHeader !== false), text('colors', 'Colors (comma separated)', chart?.colors?.join(', ')), ...positionFields(chart)], (v) => {
-                host.mutate(() => {
-                    const spec = { type: v.type, source: v.range, title: v.title, firstRowIsHeader: v.header === 'true', colors: v.colors ? v.colors.split(',').map((color) => color.trim()) : undefined, ...position(v) };
-                    if (chart)
-                        Object.assign(chart, spec);
-                    else
-                        sheet.addChart(spec);
-                });
-                openPanel(host, name);
-            }, chart ? 'Update chart' : 'Insert chart');
-        };
-        list(panel, sheet.charts.all().flatMap((chart) => [
-            { label: `${chart.title || chart.type} — ${chart.source}`, run: () => edit(chart) },
-            { label: `Remove ${chart.title || chart.type}`, run: () => { host.mutate(() => sheet.charts.remove(chart.id)); openPanel(host, name); } },
-        ]));
-        panel.append((0, dom_js_1.button)(doc, 'Insert chart', () => edit()));
-    }
     else if (name === 'pivots') {
-        const panel = host.panel('Pivot tables');
+        const panel = host.toolDialog('Pivot tables');
         const edit = (pivot) => {
-            const target = host.panel(pivot ? 'Edit pivot' : 'Create pivot');
+            const target = host.toolDialog(pivot ? 'Edit pivot' : 'Create pivot', () => !pivot || sheet.pivotSpecs.some(item => item.id === pivot.id));
             const fields = [range(pivot?.source), text('anchor', 'Output cell', pivot?.anchor ?? (0, model_1.toA1)(selection.bottom + 2, selection.left), true), text('rows', 'Group by columns (relative numbers, e.g. 1, 2)', pivot?.rows.map((column) => column + 1).join(', ') ?? '1', true)];
             let count = Math.max(1, pivot?.values.length ?? 0);
             const valueFields = (i) => [num(`column${i}`, `Value column ${i + 1} (0 to skip)`, (pivot?.values[i]?.column ?? (i ? -1 : 1)) + 1), pick(`agg${i}`, 'Aggregation', ['SUM', 'COUNT', 'COUNTA', 'AVG', 'MIN', 'MAX'], pivot?.values[i]?.agg ?? 'SUM'), text(`label${i}`, 'Output label', pivot?.values[i]?.label)];
@@ -420,64 +244,6 @@ function openPanel(host, name) {
             { label: `Remove pivot definition at ${pivot.anchor}`, run: () => { host.mutate(() => sheet.pivotSpecs.splice(sheet.pivotSpecs.indexOf(pivot), 1)); openPanel(host, name); } },
         ]));
         panel.append((0, dom_js_1.button)(doc, 'Create pivot', () => edit()));
-    }
-    else if (name === 'images' || name === 'shapes') {
-        const panel = host.panel(name === 'images' ? 'Images' : 'Shapes');
-        const edit = (object, uploaded) => {
-            const image = name === 'images';
-            const target = host.panel(object ? 'Edit object' : image ? 'Insert image' : 'Insert shape');
-            const fields = image ? [text('src', 'Image URL', object?.kind === 'image' ? object.src : uploaded, true), text('alt', 'Alternative text', object?.kind === 'image' ? object.alt : '')] : [pick('shape', 'Shape', ['rect', 'ellipse', 'textbox'], object?.kind === 'shape' ? object.shape : 'rect'), text('text', 'Text', object?.kind === 'shape' ? object.text : ''), { key: 'fill', label: 'Fill', type: 'color', value: object?.kind === 'shape' ? object.fill ?? '#e6fff4' : '#e6fff4' }, { key: 'stroke', label: 'Stroke', type: 'color', value: object?.kind === 'shape' ? object.stroke ?? '#00c47a' : '#00c47a' }, { key: 'textColor', label: 'Text color', type: 'color', value: object?.kind === 'shape' ? object.textColor ?? '#0f172a' : '#0f172a' }];
-            attach(target, [...fields, ...positionFields(object), num('zIndex', 'Stack order', object?.zIndex ?? 1)], (v) => {
-                if (image && !/^(https:|data:image\/(png|jpeg|gif|webp);base64,|blob:)/i.test(v.src))
-                    throw new Error('Use an HTTPS image URL or upload a PNG, JPEG, GIF, or WebP.');
-                host.mutate(() => {
-                    const placement = { ...position(v), zIndex: Number(v.zIndex) };
-                    if (image) {
-                        const spec = { src: v.src, alt: v.alt, ...placement };
-                        if (object)
-                            Object.assign(object, spec);
-                        else
-                            sheet.addImage(spec);
-                    }
-                    else {
-                        const spec = { shape: v.shape, text: v.text, fill: v.fill, stroke: v.stroke, textColor: v.textColor, ...placement };
-                        if (object)
-                            Object.assign(object, spec);
-                        else
-                            sheet.addShape(spec);
-                    }
-                });
-                openPanel(host, name);
-            });
-        };
-        list(panel, sheet.media.all().filter((object) => name === 'images' ? object.kind === 'image' : object.kind === 'shape').flatMap((object) => [
-            { label: object.kind === 'image' ? object.alt || 'Image' : object.text || object.shape, run: () => edit(object) },
-            { label: 'Remove object', run: () => { host.mutate(() => sheet.media.remove(object.id)); openPanel(host, name); } },
-        ]));
-        panel.append((0, dom_js_1.button)(doc, name === 'images' ? 'Insert image URL' : 'Insert shape', () => edit()));
-        if (name === 'images') {
-            const upload = (0, dom_js_1.node)(doc, 'input');
-            upload.type = 'file';
-            upload.accept = 'image/png,image/jpeg,image/gif,image/webp';
-            upload.setAttribute('aria-label', 'Upload image');
-            upload.addEventListener('change', () => {
-                const file = upload.files?.[0];
-                if (!file)
-                    return;
-                const reader = new FileReader();
-                reader.onload = () => edit(undefined, String(reader.result));
-                reader.onerror = () => host.message('Image could not be read.');
-                reader.readAsDataURL(file);
-            });
-            panel.append(upload);
-        }
-    }
-    function positionFields(object) {
-        return [text('anchor', 'Anchor cell', object ? (0, model_1.toA1)(object.anchor.row, object.anchor.column) : (0, model_1.toA1)(active.row, active.column), true), num('width', 'Width (px)', object?.width ?? 400, 20, 4000), num('height', 'Height (px)', object?.height ?? 240, 20, 4000), num('offsetX', 'Horizontal offset', object?.offsetX ?? 0), num('offsetY', 'Vertical offset', object?.offsetY ?? 0)];
-    }
-    function position(v) {
-        const anchor = validateRange(v.anchor);
-        return { anchor: { row: anchor.top, column: anchor.left }, width: Number(v.width), height: Number(v.height), offsetX: Number(v.offsetX), offsetY: Number(v.offsetY) };
     }
 }
 

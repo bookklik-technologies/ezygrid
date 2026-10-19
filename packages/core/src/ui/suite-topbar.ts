@@ -183,9 +183,10 @@ export function installSuiteTopbar(root: HTMLElement, bar: HTMLElement, parts: P
 /** Accessible transient menus used by the grid and design editor topbars. */
 export function openSuiteMenu(anchor: HTMLElement, items: { label: string; action: () => void; disabled?: boolean }[]): () => void {
   const doc = anchor.ownerDocument;
-  const bar = anchor.closest<HTMLElement>('.ezy-suite-topbar')!;
+  const bar = anchor.closest<HTMLElement>('.ezy-suite-topbar') ?? anchor.closest<HTMLElement>('.ezygrid-suite')!;
   const panel = doc.createElement('div');
   panel.className = 'ezy-suite-popup ezy-suite-transient';
+  if (!bar.classList.contains('ezy-suite-topbar')) panel.classList.add('ezg-ribbon-menu');
   panel.setAttribute('popover', 'manual');
   panel.setAttribute('role', 'menu');
   panel.setAttribute('aria-label', anchor.getAttribute('aria-label') || anchor.title || 'Actions');

@@ -672,6 +672,76 @@ declare class EditService {
 	cancel(): boolean;
 	private end;
 }
+export type FloatingKind = "chart" | "image" | "shape";
+export interface FloatingRef {
+	worksheetId: string;
+	kind: FloatingKind;
+	id: string;
+}
+export type FloatingItem = ChartSpec | MediaObject;
+export type FloatingPatch = Partial<ChartSpec> & Partial<Omit<MediaObject, "kind">> & {
+	src?: string;
+	alt?: string;
+	shape?: "rect" | "ellipse" | "textbox";
+	text?: string;
+	fill?: string;
+	stroke?: string;
+	textColor?: string;
+	zIndex?: number;
+};
+export interface Context {
+	workbook: Workbook;
+	sheet: () => Worksheet;
+	layer: HTMLElement;
+	scroll: HTMLElement;
+	zoom: () => number;
+	offset: (axis: "row" | "column", index: number) => number;
+	index: (axis: "row" | "column", pixel: number) => number;
+	changed: (ref: FloatingRef | null) => void;
+	commitEdits: () => void;
+	focusGrid: () => void;
+}
+declare class FloatingObjects {
+	private context;
+	selected: FloatingRef | null;
+	private elements;
+	private preview;
+	private gesture;
+	private ratios;
+	private sheetId;
+	private unlisten;
+	private disposed;
+	constructor(context: Context);
+	get(ref: FloatingRef): FloatingItem | undefined;
+	list(): {
+		ref: FloatingRef;
+		label: string;
+	}[];
+	private same;
+	select(ref: FloatingRef | null, reveal?: boolean): void;
+	ratioLocked(ref: FloatingRef): boolean;
+	lockRatio(ref: FloatingRef, locked: boolean): void;
+	showPreview(ref: FloatingRef, patch: FloatingPatch | null): void;
+	update(ref: FloatingRef, patch: FloatingPatch): void;
+	remove(ref: FloatingRef): void;
+	private key;
+	private geometry;
+	private placement;
+	render(): void;
+	private refAt;
+	private preventDrag;
+	private onFocus;
+	private onPointerDown;
+	private onMove;
+	private onUp;
+	private finishGesture;
+	cancel(): void;
+	private renderAfterCancel;
+	private onCancel;
+	private onGestureKey;
+	private onKeyDown;
+	destroy(): void;
+}
 export interface GridRendererOptions {
 	mode?: "editor" | "grid";
 	topbar?: boolean;
@@ -694,6 +764,8 @@ export interface GridRendererOptions {
 declare class GridRenderer {
 	readonly selection: SelectionService;
 	readonly editing: EditService;
+	/** @internal Floating object interactions shared with the editor shell. */
+	readonly objects: FloatingObjects;
 	private container;
 	private worksheet;
 	private workbook;
@@ -757,6 +829,7 @@ declare class GridRenderer {
 	private zIndexColumn;
 	private build;
 	private bind;
+	private onHeaderSelect;
 	private onHeaderResizeStart;
 	private updateHeaderResize;
 	private onHeaderResizeMove;
@@ -861,6 +934,8 @@ declare class GridRenderer {
 	private nestedLevelCount;
 	/** Render each nested header level with colspan-style spans. */
 	private renderNestedHeaders;
+	/** Outline complete merged cells without changing the logical selection. */
+	private selectionVisualBounds;
 	private renderSelection;
 	private formulaBarText;
 	private beginFormulaBarEdit;
@@ -868,9 +943,8 @@ declare class GridRenderer {
 	private updateFormulaBar;
 	/** Re-render the visible projection. Recycles cell elements between frames. */
 	render(): void;
-	/** Floating charts, images and shapes (§30/§31/§32). */
+	/** Floating charts, images and shapes with stable interaction nodes. */
 	private renderMedia;
-	private positionFloating;
 	get renderedCellCount(): number;
 	getCellElement(row: number, column: number): HTMLElement | undefined;
 	getEditorInput(): HTMLInputElement | null;

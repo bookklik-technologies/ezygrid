@@ -2,7 +2,7 @@
 
 All visual tokens are CSS custom properties scoped under `.ezygrid`, so themes are pure CSS and composable.
 
-Theme packages and `buildThemeCss` also target `.ezygrid-suite` so the ribbon, panels, dialogs, and grid share the same tokens. Default editor styles are included automatically. The View ribbon switches between light and dark appearance.
+Theme packages and `buildThemeCss` also target `.ezygrid-suite` so the ribbon, popovers, dialogs, and grid share the same tokens. Default editor styles are included automatically. The topbar Theme menu switches between light, dark, and system appearance.
 
 ## Theme packages
 

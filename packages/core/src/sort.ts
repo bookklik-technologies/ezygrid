@@ -149,7 +149,7 @@ export class SortService {
       const target = rect.top + i;
       const source = order[i]!;
       const dRow = target - source;
-      const data = rows[source]!;
+      const data = rows[source - rect.top]!;
       for (const [c, cell] of data.cells) {
         worksheet.cells.setCell(
           target,

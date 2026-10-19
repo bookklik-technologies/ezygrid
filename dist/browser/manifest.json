@@ -210,8 +210,7 @@
         "./commands.js": "core/commands",
         "./fill.js": "core/fill",
         "./format.js": "core/format",
-        "./chart-svg.js": "core/chart-svg",
-        "./charts.js": "core/charts",
+        "./floating-objects.js": "core/floating-objects",
         "@ezygrid/formula": "formula/index",
         "@ezygrid/model": "model/index",
         "./workbook.js": "core/workbook",
@@ -245,6 +244,13 @@
         "./clipboard.js": "core/clipboard"
       }
     },
+    "core/floating-objects": {
+      "file": "modules/core/floating-objects.js",
+      "dependencies": {
+        "./charts.js": "core/charts",
+        "./chart-svg.js": "core/chart-svg"
+      }
+    },
     "core/chart-svg": {
       "file": "modules/core/chart-svg.js",
       "dependencies": {
@@ -259,6 +265,9 @@
         "./dom.js": "core/ui/dom",
         "./styles.js": "core/ui/styles",
         "./panels.js": "core/ui/panels",
+        "./layout-ribbon.js": "core/ui/layout-ribbon",
+        "./headers-ribbon.js": "core/ui/headers-ribbon",
+        "./tools-ribbon.js": "core/ui/tools-ribbon",
         "../xlsx/index.js": "core/xlsx/index",
         "../print.js": "core/print",
         "../theme.js": "core/theme",
@@ -288,7 +297,9 @@
         "../replace.js": "core/replace",
         "../sort.js": "core/sort",
         "../fill.js": "core/fill",
-        "@ezygrid/formula": "formula/index"
+        "./object-panel.js": "core/ui/object-panel",
+        "./table-panel.js": "core/ui/table-panel",
+        "./ribbon-actions.js": "core/ui/ribbon-actions"
       }
     },
     "core/search": {
@@ -305,6 +316,73 @@
       "file": "modules/core/sort.js",
       "dependencies": {
         "./clipboard.js": "core/clipboard"
+      }
+    },
+    "core/ui/object-panel": {
+      "file": "modules/core/ui/object-panel.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index",
+        "./dom.js": "core/ui/dom",
+        "../charts.js": "core/charts",
+        "../chart-svg.js": "core/chart-svg",
+        "./ribbon-actions.js": "core/ui/ribbon-actions"
+      }
+    },
+    "core/ui/ribbon-actions": {
+      "file": "modules/core/ui/ribbon-actions.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index",
+        "../charts.js": "core/charts"
+      }
+    },
+    "core/ui/table-panel": {
+      "file": "modules/core/ui/table-panel.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index",
+        "../format.js": "core/format",
+        "./dom.js": "core/ui/dom"
+      }
+    },
+    "core/ui/layout-ribbon": {
+      "file": "modules/core/ui/layout-ribbon.js",
+      "dependencies": {
+        "../workbook.js": "core/workbook",
+        "./dom.js": "core/ui/dom",
+        "./suite-topbar.js": "core/ui/suite-topbar",
+        "./layout-actions.js": "core/ui/layout-actions"
+      }
+    },
+    "core/ui/suite-topbar": {
+      "file": "modules/core/ui/suite-topbar.js",
+      "dependencies": {}
+    },
+    "core/ui/layout-actions": {
+      "file": "modules/core/ui/layout-actions.js",
+      "dependencies": {
+        "../workbook.js": "core/workbook",
+        "../format.js": "core/format"
+      }
+    },
+    "core/ui/headers-ribbon": {
+      "file": "modules/core/ui/headers-ribbon.js",
+      "dependencies": {
+        "./dom.js": "core/ui/dom",
+        "./layout-actions.js": "core/ui/layout-actions"
+      }
+    },
+    "core/ui/tools-ribbon": {
+      "file": "modules/core/ui/tools-ribbon.js",
+      "dependencies": {
+        "@ezygrid/model": "model/index",
+        "@ezygrid/formula": "formula/index",
+        "./dom.js": "core/ui/dom",
+        "./panels.js": "core/ui/panels",
+        "./object-panel.js": "core/ui/object-panel",
+        "./table-panel.js": "core/ui/table-panel",
+        "./ribbon-actions.js": "core/ui/ribbon-actions",
+        "../search.js": "core/search",
+        "../sort.js": "core/sort",
+        "./suite-topbar.js": "core/ui/suite-topbar"
       }
     },
     "core/xlsx/index": {
@@ -350,10 +428,6 @@
     },
     "core/theme": {
       "file": "modules/core/theme.js",
-      "dependencies": {}
-    },
-    "core/ui/suite-topbar": {
-      "file": "modules/core/ui/suite-topbar.js",
       "dependencies": {}
     },
     "core/ui/cell-style": {

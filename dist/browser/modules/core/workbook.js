@@ -1782,6 +1782,7 @@ class Workbook {
                     freezeColumns: sheet.freezeColumns,
                     pivots: sheet.pivotSpecs.map((spec) => ({ ...spec, rows: [...spec.rows], values: spec.values.map((value) => ({ ...value })) })),
                     tables: sheet.tables.all().map((table) => ({
+                        id: table.id,
                         name: table.name,
                         range: (0, model_1.rectToRange)(table.range),
                         headerRow: table.headerRow,
@@ -1911,6 +1912,8 @@ class Workbook {
                             headerRow: table.headerRow !== false,
                             totalRow: table.totalRow === true,
                         });
+                        if (typeof table.id === 'string' && table.id && !sheet.tables.all().some(item => item.name !== table.name && item.id === table.id))
+                            sheet.getTable(table.name).id = table.id;
                     }
                     catch {
                         // duplicate/invalid tables are skipped rather than failing the load

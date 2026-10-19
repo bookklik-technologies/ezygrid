@@ -20,6 +20,12 @@ Structural changes:
 
 ## Resizing rows and columns
 
+In the editor, select cells and open the **Layout** tab. The **Rows** and **Columns** ribbon groups show the affected selection without requiring numeric indexes or a sidebar. Click a row number or column letter to select its entire band; Shift-click another header to extend the selection. Disconnected selections must be replaced with one continuous range before using layout actions. Hover over an icon to see its action name.
+
+**Insert above/below** and **Insert left/right** insert as many rows or columns as selected. Delete and Hide apply to the selection. The **Show hidden rows/columns** ribbon menus list hidden ranges and a Show all action. Layout actions keep at least one row/column and at least one visible band. Each completed action is one undo step.
+
+Enter **Row height (px)** or **Column width (px)** in the ribbon and choose **Apply row height** or **Apply column width** for exact dimensions. Differing selected dimensions show **Mixed**. The editor accepts 16–2000px row heights and 24–2000px column widths. **Auto-fit** measures formatted cell values, font styles, line breaks and wrapping, excluding merged cells; empty bands return to their default size. Dimensions are worksheet pixels and do not change with zoom.
+
 Drag the right edge of a column header or the bottom edge of a row header to resize it. Cells follow the pointer immediately, including when scrolled or zoomed. Release to save one undoable change, or press Escape to cancel. Dragging affects only that row or column, with a minimum column width of 24px and row height of 16px before zoom.
 
 Set exact dimensions through the [Worksheet API](../api/worksheet.md#structure):
@@ -54,6 +60,12 @@ sheet.getGroups();
 ```
 
 ## Nested headers
+
+In the **Layout** ribbon's **Grouped headers** group, add a header level, then edit the selected group's label and first/last column letters. Use the level/group selectors to switch between entries, and the action icons to add, remove or reorder them. New groups use the selected columns when possible, otherwise the first available column. Groups on the same level cannot overlap; different levels are independent. Blank labels are allowed for spacing.
+
+**Preview grouped headers** opens a live preview beneath the ribbon, showing eight columns at a time with Previous/Next controls. **Save headers** commits the draft as one undo step. **Cancel header changes**, Escape in the header controls, changing tabs or changing sheets discards it. Escape inside the preview closes the preview. Remove every level and save to clear grouped headers. These labels appear above A/B/C and do not replace values in worksheet cells.
+
+Inserting or deleting columns through the Layout ribbon moves grouped headers with their columns. Insertion inside a group expands it; deletion shrinks it or removes it when all its columns are deleted. One undo restores both the columns and headers. Programmatic structural APIs retain their existing behavior.
 
 Multi-level column headers with spans:
 

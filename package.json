@@ -1,6 +1,6 @@
 {
   "name": "@bookklik/ezygrid",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Framework-agnostic JavaScript/TypeScript spreadsheet and data-grid library.",
   "keywords": [
     "spreadsheet",

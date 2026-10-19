@@ -6,8 +6,7 @@ import { CommandRegistry, createDefaultCommands, type CommandContext } from './c
 import { FillService } from './fill.js';
 import { translateFormula } from './clipboard.js';
 import { formatValue } from './format.js';
-import { renderChartSVG } from './chart-svg.js';
-import { readChartData } from './charts.js';
+import { FloatingObjects } from './floating-objects.js';
 import { formulaRegistry, type FunctionMeta } from '@ezygrid/formula';
 import { parseRange, rectContains, toA1, type Rect } from '@ezygrid/model';
 import type { CellStyle } from './workbook.js';
@@ -79,6 +78,8 @@ interface HeaderResize {
 export class GridRenderer {
   readonly selection: SelectionService;
   readonly editing: EditService;
+  /** @internal Floating object interactions shared with the editor shell. */
+  readonly objects!: FloatingObjects;
   private container: HTMLElement;
   private worksheet: Worksheet;
   private workbook: Workbook;
@@ -138,6 +139,13 @@ export class GridRenderer {
     try {
       this.registerDefaultCommands();
       this.build();
+      this.objects = new FloatingObjects({
+        workbook, sheet: () => this.worksheet, layer: this.mediaLayer!, scroll: this.scrollEl,
+        zoom: () => this.zoom, offset: (axis, index) => this.axisOffset(axis, index),
+        index: (axis, pixel) => this.axisIndex(axis, pixel),
+        changed: ref => { this.renderSelection(); this.shell?.inspectObject(ref); },
+        commitEdits: () => this.commitEdits(), focusGrid: () => this.focus(),
+      });
       this.bind();
       if (this.options.mode === 'editor') this.shell = new EditorShell(this.container, this.root, workbook, this, this.options);
       const Observer = this.container.ownerDocument.defaultView?.ResizeObserver;
@@ -240,11 +248,13 @@ export class GridRenderer {
   /** Enable a paginated view (database-grid mode). */
   enablePagination(pageSize: number): void {
     this.pagination = { pageSize: Math.max(1, pageSize), page: 0 };
+    this.shell?.paginationChanged(this.pagination);
     this.render();
   }
 
   disablePagination(): void {
     this.pagination = null;
+    this.shell?.paginationChanged(null);
     this.render();
   }
 
@@ -266,6 +276,7 @@ export class GridRenderer {
 
   setZoom(zoom: number): void {
     if (!Number.isFinite(zoom) || zoom <= 0) return;
+    this.objects?.cancel();
     this.clearHeaderResize();
     this.zoom = zoom;
     for (const [, el] of this.activeCells) {
@@ -636,7 +647,10 @@ export class GridRenderer {
   }
 
   private bind(): void {
+    let lastSelection = JSON.stringify(this.selection.state);
     this.unlistenSelection = this.selection.onChange(() => {
+      const nextSelection = JSON.stringify(this.selection.state);
+      if (nextSelection !== lastSelection) { lastSelection = nextSelection; this.objects.select(null); }
       const active = this.selection.state.active;
       if (this.formulaBarEdit && (this.formulaBarEdit.row !== active.row || this.formulaBarEdit.column !== active.column)) {
         this.commitFormulaBarEdit();
@@ -650,6 +664,8 @@ export class GridRenderer {
     this.scrollEl.addEventListener('scroll', this.onScroll);
     this.colHeaderEl.addEventListener('pointerdown', this.onHeaderResizeStart);
     this.rowHeaderEl.addEventListener('pointerdown', this.onHeaderResizeStart);
+    this.colHeaderEl.addEventListener('click', this.onHeaderSelect);
+    this.rowHeaderEl.addEventListener('click', this.onHeaderSelect);
     this.cellLayer.addEventListener('mousedown', this.onMouseDown);
     this.cellLayer.addEventListener('dblclick', this.onDoubleClick);
     this.root.addEventListener('keydown', this.onKeyDown);
@@ -660,6 +676,23 @@ export class GridRenderer {
       this.fillHandle.addEventListener('mousedown', this.onFillHandleDown);
     }
   }
+
+  private onHeaderSelect = (event: MouseEvent): void => {
+    if (event.button !== 0 || this.headerResize || (event.target as HTMLElement).closest('[data-resize-axis]')) return;
+    const label = (event.target as HTMLElement).closest<HTMLElement>('[data-column-header], [data-row-header]');
+    if (!label) return;
+    this.commitEdits();
+    const column = label.dataset.columnHeader !== undefined;
+    const index = Number(column ? label.dataset.columnHeader : label.dataset.rowHeader);
+    const anchor = { ...this.selection.state.anchor };
+    if (event.shiftKey) {
+      this.selection.setActive(column ? 0 : anchor.row, column ? anchor.column : 0);
+      this.selection.extendTo(column ? this.worksheet.rowCount - 1 : index, column ? index : this.worksheet.columnCount - 1);
+    } else if (column) this.selection.selectColumn(index);
+    else this.selection.selectRow(index);
+    this.root.focus({ preventScroll: true });
+    this.render();
+  };
 
   private onHeaderResizeStart = (event: PointerEvent): void => {
     if (event.button !== 0 || this.headerResize) return;
@@ -1094,6 +1127,7 @@ export class GridRenderer {
     const row = target.dataset?.row;
     const column = target.dataset?.col;
     if (row === undefined || column === undefined) return;
+    this.objects.select(null);
     let r = Number(row);
     let c = Number(column);
     const merge = this.worksheet.merges.findAt(r, c);
@@ -1139,6 +1173,7 @@ export class GridRenderer {
   };
 
   private onKeyDown = (event: KeyboardEvent): void => {
+    if ((event.target as HTMLElement).closest('[data-object-id]')) return;
     if ((event.target as HTMLElement).closest('input,select,textarea,[contenteditable="true"]')) return;
     if (this.fillDragging) {
       event.preventDefault();
@@ -1272,12 +1307,13 @@ export class GridRenderer {
   private renderFillPreview(): void {
     if (!this.fillDragging || !this.fillSource || !this.fillPointer) return;
     const range = this.getFillPlan() ?? this.fillSource;
+    const visual = this.selectionVisualBounds(range);
     Object.assign(this.fillPreview.style, {
       display: 'block',
-      left: `${this.zOffsetX(range.left)}px`,
-      top: `${this.zOffsetY(range.top)}px`,
-      width: `${this.zOffsetX(range.right + 1) - this.zOffsetX(range.left)}px`,
-      height: `${this.zOffsetY(range.bottom + 1) - this.zOffsetY(range.top)}px`,
+      left: `${this.zOffsetX(visual.left)}px`,
+      top: `${this.zOffsetY(visual.top)}px`,
+      width: `${this.zOffsetX(visual.right + 1) - this.zOffsetX(visual.left)}px`,
+      height: `${this.zOffsetY(visual.bottom + 1) - this.zOffsetY(visual.top)}px`,
     });
     const address = `${toA1(range.top, range.left)}:${toA1(range.bottom, range.right)}`;
     if (this.fillRangeLabel.textContent !== address) this.fillRangeLabel.textContent = address;
@@ -1542,7 +1578,10 @@ export class GridRenderer {
 
   private beginEditAt(initial?: string): void {
     if (this.editing.editing) return;
-    const { row, column } = this.selection.state.active;
+    const active = this.selection.state.active;
+    const merge = this.worksheet.merges.findAt(active.row, active.column);
+    const row = merge?.top ?? active.row;
+    const column = merge?.left ?? active.column;
     const editorSpec = this.worksheet.getEditorFor(row, column);
     if (editorSpec?.type === 'checkbox') {
       const current = this.worksheet.cells.getCell(row, column);
@@ -1596,6 +1635,15 @@ export class GridRenderer {
     Object.assign(input.style, {
       position: 'absolute',
       boxSizing: 'border-box',
+      minWidth: '0',
+      minHeight: '0',
+      margin: '0',
+      padding: '0 6px',
+      border: '2px solid var(--ezygrid-selection, #00c47a)',
+      borderRadius: '0',
+      outline: 'none',
+      background: 'var(--ezygrid-bg, #fff)',
+      color: 'inherit',
       font: 'inherit',
       zIndex: '10',
       userSelect: 'text',
@@ -1712,10 +1760,15 @@ export class GridRenderer {
   }
 
   private positionEditor(input: HTMLElement, row: number, column: number): void {
-    input.style.left = `${this.zOffsetX(column)}px`;
-    input.style.top = `${this.zOffsetY(row)}px`;
-    input.style.width = `${this.zSizeX(column)}px`;
-    input.style.height = `${this.zSizeY(row)}px`;
+    const bounds = this.worksheet.merges.findAt(row, column) ?? {
+      top: row, left: column, bottom: row, right: column,
+    };
+    const left = this.zOffsetX(bounds.left);
+    const top = this.zOffsetY(bounds.top);
+    input.style.left = `${left}px`;
+    input.style.top = `${top}px`;
+    input.style.width = `${this.zOffsetX(bounds.right + 1) - left}px`;
+    input.style.height = `${this.zOffsetY(bounds.bottom + 1) - top}px`;
   }
 
   private unmountEditor(): void {
@@ -1939,12 +1992,13 @@ export class GridRenderer {
     this.setCellBackground(cell, merged.background ?? '');
     // Structured table banding (§25).
     const table = this.worksheet.tables.at(row, column);
-    if (table && row > table.range.top) {
+    if (table?.headerRow && row === table.range.top && merged.bold === undefined) cell.style.fontWeight = 'bold';
+    if (table) {
       const bandIndex = row - (table.headerRow ? table.range.top + 1 : table.range.top);
       const totalRowCell = table.totalRow && row === table.range.bottom;
       if (totalRowCell) {
         cell.style.fontWeight = 'bold';
-      } else if (bandIndex % 2 === 1 && !merged.background) {
+      } else if (!(table.headerRow && row === table.range.top) && bandIndex % 2 === 1 && !merged.background) {
         this.setCellBackground(cell, 'var(--ezygrid-table-band, rgba(0,0,0,0.03))');
       }
     }
@@ -2180,6 +2234,29 @@ export class GridRenderer {
     }
   }
 
+  /** Outline complete merged cells without changing the logical selection. */
+  private selectionVisualBounds(range: Rect): Rect {
+    const bounds = { ...range };
+    let changed: boolean;
+    do {
+      changed = false;
+      for (const merge of this.worksheet.merges.all) {
+        if (merge.bottom < bounds.top || merge.top > bounds.bottom ||
+            merge.right < bounds.left || merge.left > bounds.right) continue;
+        const top = Math.min(bounds.top, merge.top);
+        const left = Math.min(bounds.left, merge.left);
+        const bottom = Math.max(bounds.bottom, merge.bottom);
+        const right = Math.max(bounds.right, merge.right);
+        if (top !== bounds.top || left !== bounds.left ||
+            bottom !== bounds.bottom || right !== bounds.right) {
+          Object.assign(bounds, { top, left, bottom, right });
+          changed = true;
+        }
+      }
+    } while (changed);
+    return bounds;
+  }
+
   private renderSelection(refreshStyles = true): void {
     if (this.destroyed) return;
     // Expose the active cell to assistive technology through
@@ -2199,13 +2276,13 @@ export class GridRenderer {
         }
       }
     }
-    const primary = this.selection.primary;
+    const primary = this.selectionVisualBounds(this.selection.primary);
     const top = this.zOffsetY(primary.top);
     const left = this.zOffsetX(primary.left);
     const height = this.zOffsetY(primary.bottom + 1) - top;
     const width = this.zOffsetX(primary.right + 1) - left;
     Object.assign(this.selectionOverlay.style, {
-      display: this.selectionVisible ? 'block' : 'none',
+      display: this.selectionVisible && !this.objects?.selected ? 'block' : 'none',
       left: `${left}px`,
       top: `${top}px`,
       width: `${width}px`,
@@ -2213,7 +2290,7 @@ export class GridRenderer {
     } as CSSStyleDeclaration);
     if (this.fillHandle) {
       Object.assign(this.fillHandle.style, {
-        display: this.selectionVisible ? 'block' : 'none',
+        display: this.selectionVisible && !this.objects?.selected ? 'block' : 'none',
         left: `${left + width - 4}px`,
         top: `${top + height - 4}px`,
       } as CSSStyleDeclaration);
@@ -2345,73 +2422,16 @@ export class GridRenderer {
     this.renderHeaders();
     this.renderFrozen();
     this.renderSelection(false);
+    if (this.editorInput && this.editing.session) {
+      const { row, column } = this.editing.session;
+      this.positionEditor(this.editorInput, row, column);
+    }
     this.renderMedia();
     this.shell?.update();
   }
 
-  /** Floating charts, images and shapes (§30/§31/§32). */
-  private renderMedia(): void {
-    if (!this.mediaLayer) return;
-    const doc = this.container.ownerDocument;
-    this.mediaLayer.textContent = '';
-    for (const chart of this.worksheet.charts.all()) {
-      const data = readChartData(this.worksheet, chart);
-      const wrapper = doc.createElement('div');
-      wrapper.className = 'ezygrid-chart';
-      wrapper.innerHTML = renderChartSVG(chart, data);
-      Object.assign(wrapper.style, {
-        position: 'absolute',
-        pointerEvents: 'auto',
-        background: 'var(--ezygrid-bg, #fff)',
-        border: '1px solid var(--ezygrid-gridline, #e2e8f0)',
-        overflow: 'hidden',
-      } as CSSStyleDeclaration);
-      this.positionFloating(wrapper, chart.anchor, chart.offsetX, chart.offsetY);
-      wrapper.style.width = `${chart.width ?? 320}px`;
-      wrapper.style.height = `${chart.height ?? 240}px`;
-      this.mediaLayer.appendChild(wrapper);
-    }
-    for (const object of this.worksheet.media.all()) {
-      const el = doc.createElement('div');
-      el.className = 'ezygrid-media-object';
-      Object.assign(el.style, {
-        position: 'absolute',
-        pointerEvents: 'auto',
-        overflow: 'hidden',
-      } as CSSStyleDeclaration);
-      if (object.kind === 'image') {
-        const img = doc.createElement('img');
-        img.src = object.src;
-        img.alt = object.alt ?? '';
-        img.style.width = '100%';
-        img.style.height = '100%';
-        el.appendChild(img);
-      } else {
-        el.style.border = `1px solid ${object.stroke ?? 'var(--ezygrid-gridline, #e2e8f0)'}`;
-        el.style.background = object.fill ?? 'transparent';
-        el.style.color = object.textColor ?? 'inherit';
-        el.style.display = 'flex';
-        el.style.alignItems = 'center';
-        el.style.justifyContent = 'center';
-        el.style.padding = '4px';
-        el.style.boxSizing = 'border-box';
-        if (object.shape === 'ellipse') el.style.borderRadius = '50%';
-        el.textContent = object.text ?? '';
-      }
-      this.positionFloating(el, object.anchor, object.offsetX, object.offsetY);
-      el.style.width = `${object.width}px`;
-      el.style.height = `${object.height}px`;
-      el.style.zIndex = String(object.zIndex ?? 1);
-      this.mediaLayer.appendChild(el);
-    }
-  }
-
-  private positionFloating(el: HTMLElement, anchor: { row: number; column: number }, offsetX?: number, offsetY?: number): void {
-    const left = this.zOffsetX(anchor.column) + (offsetX ?? 0);
-    const top = this.zOffsetY(anchor.row) + (offsetY ?? 0);
-    el.style.left = `${left}px`;
-    el.style.top = `${top}px`;
-  }
+  /** Floating charts, images and shapes with stable interaction nodes. */
+  private renderMedia(): void { this.objects?.render(); }
 
   get renderedCellCount(): number {
     return this.activeCells.size;
@@ -2428,6 +2448,7 @@ export class GridRenderer {
   destroy(): void {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.objects?.destroy();
     this.clearHeaderResize();
     this.cancelScrollFrame();
     this.resizeObserver?.disconnect();
@@ -2447,6 +2468,8 @@ export class GridRenderer {
     this.scrollEl?.removeEventListener('scroll', this.onScroll);
     this.colHeaderEl?.removeEventListener('pointerdown', this.onHeaderResizeStart);
     this.rowHeaderEl?.removeEventListener('pointerdown', this.onHeaderResizeStart);
+    this.colHeaderEl?.removeEventListener('click', this.onHeaderSelect);
+    this.rowHeaderEl?.removeEventListener('click', this.onHeaderSelect);
     this.cellLayer?.removeEventListener('mousedown', this.onMouseDown);
     this.cellLayer?.removeEventListener('dblclick', this.onDoubleClick);
     this.cellLayer?.removeEventListener('contextmenu', this.onContextMenu);

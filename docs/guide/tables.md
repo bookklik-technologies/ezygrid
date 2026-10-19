@@ -1,5 +1,19 @@
 # Tables & defined names
 
+Named tables and defined names give cell ranges meaningful names for formulas. Creating a table is optional; charts can read ordinary cell ranges directly.
+
+## Format selected data as a table {#create-a-named-table-in-the-editor}
+
+Select your data and open **Data → Format as table**. If only one populated cell is active, the editor detects its surrounding data block. Review the selected row and column counts and the dialog preview, confirm whether the first row contains column titles, then choose **Create table**. **Use selected cells** restores the current selection; **Advanced → Cell addresses** accepts a different range. Cancelling leaves the workbook unchanged.
+
+The editor assigns a unique formula name automatically. **Advanced** contains the name, precise cell addresses and **Make the last row bold**. This last option formats existing values; it does not calculate totals.
+
+Select cells entirely inside one table to reveal the **Table** ribbon tab. It provides name, header-row and bold-last-row settings, **Resize table**, and **Remove table**. The tab appears without interrupting your current ribbon tab. **Resize table** or **Data → Format as table** opens a dialog with range editing and a preview; other tables are listed there. Removing a table keeps its cell data. Creating or updating a table is undoable, and editing an existing table preserves its ID.
+
+JSON saves retain table IDs so undo, redo, and reopening a workbook keep table identity. Older JSON files without table IDs remain supported and receive IDs when loaded.
+
+Tables show column titles in bold by default, retain explicitly supplied cell formatting, add alternating row shading and support structured references such as `Sales[Revenue]`.
+
 ## Structured tables
 
 ```ts
