@@ -7,6 +7,7 @@ exports.openObjectManager = openObjectManager;
 const model_1 = require("@ezygrid/model");
 const formula_1 = require("@ezygrid/formula");
 const dom_js_1 = require("./dom.js");
+const select_js_1 = require("./select.js");
 const panels_js_1 = require("./panels.js");
 const object_panel_js_1 = require("./object-panel.js");
 const table_panel_js_1 = require("./table-panel.js");
@@ -23,6 +24,7 @@ function selectedTable(host) {
 function mountToolsRibbon(host, ribbon, tab) {
     const { doc, renderer } = host;
     const groups = [];
+    const selects = [];
     const updates = [];
     let closeMenu;
     let disposed = false;
@@ -86,10 +88,8 @@ function mountToolsRibbon(host, ribbon, tab) {
     const pick = (target, label, choices) => {
         const wrapper = (0, dom_js_1.node)(doc, 'label', 'ezg-ribbon-field');
         wrapper.append((0, dom_js_1.node)(doc, 'span', '', label));
-        const input = (0, dom_js_1.node)(doc, 'select');
-        input.setAttribute('aria-label', label);
-        for (const choice of choices)
-            input.append((0, dom_js_1.node)(doc, 'option', '', choice));
+        const input = (0, select_js_1.createSelect)(doc, { label, options: choices, popupHost: host.root });
+        selects.push(input);
         wrapper.append(input);
         target.append(wrapper);
         return input;
@@ -194,12 +194,9 @@ function mountToolsRibbon(host, ribbon, tab) {
         const search = field(functions, 'Search functions');
         const choices = pick(functions, 'Function', []);
         const populate = () => {
-            choices.replaceChildren();
-            for (const meta of formula_1.formulaRegistry.all().filter(fn => `${fn.name} ${fn.description}`.toLowerCase().includes(search.value.toLowerCase()))) {
-                const option = (0, dom_js_1.node)(doc, 'option', '', meta.name);
-                option.title = meta.description ?? meta.name;
-                choices.append(option);
-            }
+            choices.setOptions(formula_1.formulaRegistry.all()
+                .filter(fn => `${fn.name} ${fn.description}`.toLowerCase().includes(search.value.toLowerCase()))
+                .map(meta => ({ value: meta.name, title: meta.description ?? meta.name })));
         };
         search.addEventListener('input', populate);
         populate();
@@ -407,7 +404,8 @@ function mountToolsRibbon(host, ribbon, tab) {
         }
     }
     refresh();
-    return { refresh, destroy() { disposed = true; closeMenu?.(); for (const section of groups)
+    return { refresh, destroy() { disposed = true; closeMenu?.(); for (const select of selects)
+            select.destroy(); for (const section of groups)
             section.remove(); } };
 }
 function openObjectManager(host) {

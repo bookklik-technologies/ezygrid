@@ -15,7 +15,7 @@ function click(editor: Ezygrid, label: string) {
 }
 function open(editor: Ezygrid, _label = 'Rows and columns') { click(editor, 'Layout'); }
 function select(editor: Ezygrid, label: string, value: string) {
-  const control = editor.target.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!;
+  const control = editor.target.querySelector<HTMLElement & { value: string }>(`[role=combobox][aria-label="${label}"]`)!;
   control.value = value; control.dispatchEvent(new Event('change', { bubbles: true }));
 }
 function field(editor: Ezygrid, label: string, value: string, index = 0) {
@@ -37,7 +37,7 @@ describe('selection-aware worksheet layout', () => {
     }
     editor.renderer.commands.execute('panel.headers', context);
     expect(document.activeElement?.getAttribute('aria-label')).toBe('Add header level');
-    expect(editor.target.querySelector<HTMLSelectElement>('[aria-label="Header level"]')?.selectedOptions[0]?.textContent).toBe('No levels');
+    expect(editor.target.querySelector<HTMLElement>('[aria-label="Header level"] .ezg-select-value')?.textContent).toBe('No levels');
   });
   it('selects whole headers and extends from their anchor without affecting resize-handle clicks', () => {
     const editor = mount();

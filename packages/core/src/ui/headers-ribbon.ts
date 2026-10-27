@@ -1,5 +1,6 @@
 import type { EditorShell } from './editor-shell.js';
 import { button, node } from './dom.js';
+import { createSelect, type SelectControl } from './select.js';
 import { columnIndex, columnName, commitLayout, readHeaderGroups, writeHeaderGroups } from './layout-actions.js';
 import type { RibbonControls } from './layout-ribbon.js';
 
@@ -11,8 +12,10 @@ export function mountHeadersRibbon(host: EditorShell, ribbon: HTMLElement): Ribb
   const group = node(doc, 'section', 'ezg-group ezg-headers-ribbon-group'); group.setAttribute('role', 'group'); group.setAttribute('aria-label', 'Grouped headers');
   const controls = node(doc, 'div', 'ezg-layout-ribbon-controls');
   const firstRow = node(doc, 'div', 'ezg-layout-ribbon-actions'); const secondRow = node(doc, 'div', 'ezg-layout-ribbon-actions');
-  const levelSelect = node(doc, 'select'); levelSelect.setAttribute('aria-label', 'Header level'); levelSelect.title = 'Header level';
-  const groupSelect = node(doc, 'select'); groupSelect.setAttribute('aria-label', 'Header group'); groupSelect.title = 'Header group';
+  const levelSelect: SelectControl = createSelect(doc, { label: 'Header level', popupHost: controls });
+  levelSelect.title = 'Header level';
+  const groupSelect: SelectControl = createSelect(doc, { label: 'Header group', popupHost: controls });
+  groupSelect.title = 'Header group';
   const status = node(doc, 'p', 'ezg-ribbon-error'); status.setAttribute('role', 'status'); status.setAttribute('aria-live', 'polite');
   const caption = node(doc, 'span', 'ezg-group-label'); caption.setAttribute('aria-live', 'polite');
   const label = node(doc, 'input'); label.setAttribute('aria-label', 'Header label'); label.title = 'Header label'; label.placeholder = 'Header label'; label.className = 'ezg-header-label-input';
@@ -86,14 +89,15 @@ export function mountHeadersRibbon(host: EditorShell, ribbon: HTMLElement): Ribb
     if (disposed || busy) return;
     if (sheet !== host.sheet || saved !== JSON.stringify(host.sheet.nestedHeaders)) { closePreview(); reset(); force = true; }
     levelIndex = Math.max(0, Math.min(levelIndex, levels.length - 1)); groupIndex = Math.max(0, Math.min(groupIndex, (levels[levelIndex]?.length ?? 0) - 1));
-    levelSelect.replaceChildren();
-    for (let i = 0; i < levels.length; i++) { const option = node(doc, 'option', '', `Level ${i + 1}`); option.value = String(i); levelSelect.append(option); }
-    if (!levels.length) { const option = node(doc, 'option', '', 'No levels'); option.value = '0'; levelSelect.append(option); }
+    levelSelect.setOptions(levels.length
+      ? levels.map((_, index) => ({ value: String(index), label: `Level ${index + 1}` }))
+      : [{ value: '0', label: 'No levels' }]);
     levelSelect.value = String(levelIndex); levelSelect.disabled = !levels.length;
-    groupSelect.replaceChildren();
-    for (const [index, item] of (levels[levelIndex] ?? []).entries()) { const option = node(doc, 'option', '', `${item.label || 'Blank'} (${item.from}:${item.to})`); option.value = String(index); groupSelect.append(option); }
-    if (!levels[levelIndex]?.length) { const option = node(doc, 'option', '', 'No groups'); option.value = '0'; groupSelect.append(option); }
-    groupSelect.value = String(groupIndex); groupSelect.disabled = !levels[levelIndex]?.length;
+    const levelGroups = levels[levelIndex] ?? [];
+    groupSelect.setOptions(levelGroups.length
+      ? levelGroups.map((item, index) => ({ value: String(index), label: `${item.label || 'Blank'} (${item.from}:${item.to})` }))
+      : [{ value: '0', label: 'No groups' }]);
+    groupSelect.value = String(groupIndex); groupSelect.disabled = !levelGroups.length;
     const item = current();
     for (const [input, value] of [[label, item?.label ?? ''], [from, item?.from ?? ''], [to, item?.to ?? '']] as const) { input.disabled = !item; if (force || doc.activeElement !== input) input.value = value; }
     remove.disabled = !item; add.disabled = removeLevel.disabled = !levels.length;
@@ -139,5 +143,5 @@ export function mountHeadersRibbon(host: EditorShell, ribbon: HTMLElement): Ribb
     if (event.key === 'Enter' && (event.target as HTMLElement).tagName === 'INPUT') { event.preventDefault(); if (!save.disabled) save.click(); }
   });
   refresh(true);
-  return { refresh: () => refresh(), destroy() { disposed = true; closePreview(); group.remove(); } };
+  return { refresh: () => refresh(), destroy() { disposed = true; closePreview(); levelSelect.destroy(); groupSelect.destroy(); group.remove(); } };
 }

@@ -1,3 +1,7 @@
+import { createSelect, type SelectControl } from './select.js';
+
+export type FormControl = HTMLInputElement | HTMLTextAreaElement | SelectControl;
+
 export function node<K extends keyof HTMLElementTagNameMap>(doc: Document, tag: K, className = '', text = ''): HTMLElementTagNameMap[K] {
   const element = doc.createElement(tag);
   element.className = className;
@@ -119,20 +123,24 @@ export function form(doc: Document, fields: Field[], submit: (values: Values) =>
   const element = node(doc, 'form', 'ezg-form');
   for (const field of fields) {
     const wrapper = node(doc, 'label', 'ezg-field', field.label);
-    const input = field.options ? node(doc, 'select') : field.type === 'textarea' ? node(doc, 'textarea') : node(doc, 'input');
-    input.name = field.key;
-    input.setAttribute('aria-label', field.label);
-    input.required = field.required ?? false;
+    let input: FormControl;
     if (field.options) {
-      for (const value of field.options) (input as HTMLSelectElement).append(node(doc, 'option', '', value));
-    } else if (input.tagName === 'INPUT') {
-      const control = input as HTMLInputElement;
-      control.type = field.type ?? 'text';
-      if (field.min !== undefined) control.min = String(field.min);
-      if (field.max !== undefined) control.max = String(field.max);
-      if (field.type === 'checkbox') control.checked = field.value === true;
+      input = createSelect(doc, { options: field.options, value: String(field.value ?? field.options[0] ?? '') });
+      input.setAttribute('name', field.key);
+    } else {
+      input = field.type === 'textarea' ? node(doc, 'textarea') : node(doc, 'input');
+      input.name = field.key;
+      input.required = field.required ?? false;
+      if (input instanceof doc.defaultView!.HTMLInputElement) {
+        const control = input as HTMLInputElement;
+        control.type = field.type ?? 'text';
+        if (field.min !== undefined) control.min = String(field.min);
+        if (field.max !== undefined) control.max = String(field.max);
+        if (field.type === 'checkbox') control.checked = field.value === true;
+      }
+      if (field.type !== 'checkbox') input.value = String(field.value ?? '');
     }
-    if (field.type !== 'checkbox') input.value = String(field.value ?? '');
+    input.setAttribute('aria-label', field.label);
     wrapper.append(input);
     element.append(wrapper);
   }
@@ -144,8 +152,9 @@ export function form(doc: Document, fields: Field[], submit: (values: Values) =>
     event.preventDefault();
     if (!element.reportValidity()) return;
     const values: Values = {};
-    for (const input of element.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input,select,textarea')) {
-      values[input.name] = input instanceof doc.defaultView!.HTMLInputElement && input.type === 'checkbox' ? String(input.checked) : input.value;
+    for (const input of element.querySelectorAll<FormControl>('input,select,textarea,[role=combobox]')) {
+      const checkbox = input instanceof doc.defaultView!.HTMLInputElement && input.type === 'checkbox';
+      values[input.getAttribute('name') ?? ''] = checkbox ? String((input as HTMLInputElement).checked) : input.value;
     }
     submit(values);
   });

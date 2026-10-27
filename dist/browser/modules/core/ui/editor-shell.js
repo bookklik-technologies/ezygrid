@@ -5,6 +5,7 @@ exports.EditorShell = void 0;
 const workbook_js_1 = require("../workbook.js");
 const model_1 = require("@ezygrid/model");
 const dom_js_1 = require("./dom.js");
+const select_js_1 = require("./select.js");
 const styles_js_1 = require("./styles.js");
 const panels_js_1 = require("./panels.js");
 const layout_ribbon_js_1 = require("./layout-ribbon.js");
@@ -215,14 +216,12 @@ class EditorShell {
         this.tabs.hidden = !options.sheetTabs;
         this.stats = (0, dom_js_1.node)(this.doc, 'span', 'ezg-stats');
         this.stats.hidden = !options.statusBar;
-        this.zoom = (0, dom_js_1.node)(this.doc, 'select');
-        this.zoom.setAttribute('aria-label', 'Zoom');
+        this.zoom = (0, select_js_1.createSelect)(this.doc, {
+            label: 'Zoom',
+            options: [25, 50, 75, 100, 125, 150, 175, 200].map((percent) => ({ value: String(percent), label: `${percent}%` })),
+            popupHost: this.root,
+        });
         this.zoom.hidden = !options.statusBar;
-        for (const percent of [25, 50, 75, 100, 125, 150, 175, 200]) {
-            const option = (0, dom_js_1.node)(this.doc, 'option', '', `${percent}%`);
-            option.value = String(percent);
-            this.zoom.append(option);
-        }
         this.zoom.addEventListener('change', () => renderer.setZoom(Number(this.zoom.value) / 100));
         bottom.append(this.tabs, this.stats, this.zoom);
         this.fileInput = (0, dom_js_1.node)(this.doc, 'input');
@@ -494,10 +493,7 @@ class EditorShell {
             const group = (0, dom_js_1.node)(this.doc, 'div', 'ezg-group');
             const controls = (0, dom_js_1.node)(this.doc, 'div', 'ezg-controls');
             if (title === 'Home' && name === 'Font') {
-                const font = (0, dom_js_1.node)(this.doc, 'select');
-                font.setAttribute('aria-label', 'Font family');
-                for (const family of ['Outfit', 'Arial', 'Georgia', 'Times New Roman', 'Courier New', 'Verdana'])
-                    font.append((0, dom_js_1.node)(this.doc, 'option', '', family));
+                const font = (0, select_js_1.createSelect)(this.doc, { label: 'Font family', options: ['Outfit', 'Arial', 'Georgia', 'Times New Roman', 'Courier New', 'Verdana'], popupHost: controls });
                 font.dataset.style = 'fontFamily';
                 font.addEventListener('change', () => this.style({ fontFamily: font.value }));
                 const size = (0, dom_js_1.node)(this.doc, 'input');
@@ -664,7 +660,7 @@ class EditorShell {
         panel.showModal();
         queueMicrotask(() => {
             if (this.toolElement === panel && panel.querySelector('header')?.contains(this.doc.activeElement)) {
-                panel.querySelector(':scope > :not(header) input:not([type=hidden]), :scope > :not(header) select, :scope > :not(header) textarea, :scope > :not(header) button')?.focus({ preventScroll: true });
+                panel.querySelector(':scope > :not(header) input:not([type=hidden]), :scope > :not(header) select, :scope > :not(header) textarea, :scope > :not(header) [role=combobox], :scope > :not(header) button')?.focus({ preventScroll: true });
             }
         });
         this.toolCleanup = () => { if (!this.disposed && opener?.isConnected)

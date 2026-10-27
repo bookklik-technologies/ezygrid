@@ -88,11 +88,15 @@ describe('GridRenderer Phase 2 remainder', () => {
     const renderer = new GridRenderer(container, wb);
     renderer.getCellElement(0, 0)!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     renderer['root'].dispatchEvent(new KeyboardEvent('keydown', { key: 'x', bubbles: true }));
-    const select = renderer.getEditorInput() as unknown as HTMLSelectElement;
-    expect(select.tagName).toBe('SELECT');
-    select.value = 'medium';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
+    const dropdown = renderer.getEditorInput() as unknown as HTMLElement;
+    expect(dropdown.classList.contains('ezg-select')).toBe(true);
+    expect((dropdown as unknown as { value: string }).value).toBe('');
+    dropdown.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    expect(dropdown.getAttribute('aria-expanded')).toBe('true');
+    const option = renderer['root'].querySelector<HTMLElement>('[role=option][data-value="medium"]')!;
+    option.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }));
     expect(ws.getValue(0, 0)).toBe('medium');
+    expect(renderer.getEditorInput()).toBeNull();
     renderer.destroy();
   });
 

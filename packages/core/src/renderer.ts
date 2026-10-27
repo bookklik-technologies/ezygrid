@@ -13,6 +13,7 @@ import type { CellStyle } from './workbook.js';
 import { DEFAULT_COLUMN_WIDTH, DEFAULT_ROW_HEIGHT } from './workbook.js';
 import { EditorShell } from './ui/editor-shell.js';
 import { applyStyle } from './ui/cell-style.js';
+import { createSelect } from './ui/select.js';
 import type { SelectionState } from './selection.js';
 
 export interface GridRendererOptions {
@@ -1601,28 +1602,23 @@ export class GridRenderer {
     const doc = this.container.ownerDocument;
     const { row, column } = session;
     const editorSpec = this.worksheet.getEditorFor(row, column);
-    let input: HTMLInputElement | HTMLSelectElement;
+    let input: HTMLInputElement;
 
     if (editorSpec?.type === 'dropdown') {
-      const select = doc.createElement('select') as HTMLSelectElement;
-      select.className = 'ezygrid-editor';
-      const options = (editorSpec.options as { values?: unknown[] })?.values ?? [];
-      select.appendChild(doc.createElement('option'));
-      for (const value of options) {
-        const option = doc.createElement('option');
-        option.value = String(value);
-        option.textContent = String(value);
-        select.appendChild(option);
-      }
+      const values = ((editorSpec.options as { values?: unknown[] })?.values ?? []).map((entry) => String(entry));
       const current = this.worksheet.getValue(row, column);
-      if (current !== null) select.value = String(current);
-      select.addEventListener('change', () => {
-        this.editing.commit(this.worksheet, select.value);
+      const control = createSelect(doc, {
+        options: ['', ...values],
+        value: current === null ? '' : String(current),
+        popupHost: this.root,
+      });
+      control.addEventListener('change', () => {
+        this.editing.commit(this.worksheet, control.value);
         this.unmountEditor();
         this.render();
         this.root.focus({ preventScroll: true });
       });
-      input = select;
+      input = control as unknown as HTMLInputElement;
     } else {
       const element = doc.createElement('input') as HTMLInputElement;
       element.className = 'ezygrid-editor';
@@ -1648,6 +1644,10 @@ export class GridRenderer {
       zIndex: '10',
       userSelect: 'text',
     } as CSSStyleDeclaration);
+    if (editorSpec?.type === 'dropdown') {
+      input.style.padding = '0';
+      input.style.userSelect = 'none';
+    }
     this.positionEditor(input, row, column);
     const cellStyle = this.worksheet.getStyle(row, column);
     input.style.fontFamily = cellStyle?.fontFamily ?? 'inherit';
@@ -1774,6 +1774,7 @@ export class GridRenderer {
   private unmountEditor(): void {
     const input = this.editorInput;
     this.editorInput = null;
+    (input as unknown as { destroy?: () => void })?.destroy?.();
     input?.remove();
     this.removeSuggestions();
   }

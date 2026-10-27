@@ -2,6 +2,7 @@ import { Workbook, type CellStyle } from '../workbook.js';
 import type { GridRenderer, GridRendererOptions } from '../renderer.js';
 import { rectToRange } from '@ezygrid/model';
 import { node, button, icon, form, type Field, type Values } from './dom.js';
+import { createSelect, type SelectControl } from './select.js';
 import { installEditorStyles } from './styles.js';
 import { openPanel } from './panels.js';
 import { mountLayoutRibbon, type RibbonControls } from './layout-ribbon.js';
@@ -100,7 +101,7 @@ export class EditorShell {
   private tabs: HTMLElement;
   private stats: HTMLElement;
   private filename: HTMLInputElement;
-  private zoom: HTMLSelectElement;
+  private zoom: SelectControl;
   private toolElement?: HTMLDialogElement;
   private toolCleanup?: () => void;
   private toolValid?: () => boolean;
@@ -213,14 +214,12 @@ export class EditorShell {
     this.tabs.hidden = !options.sheetTabs;
     this.stats = node(this.doc, 'span', 'ezg-stats');
     this.stats.hidden = !options.statusBar;
-    this.zoom = node(this.doc, 'select');
-    this.zoom.setAttribute('aria-label', 'Zoom');
+    this.zoom = createSelect(this.doc, {
+      label: 'Zoom',
+      options: [25, 50, 75, 100, 125, 150, 175, 200].map((percent) => ({ value: String(percent), label: `${percent}%` })),
+      popupHost: this.root,
+    });
     this.zoom.hidden = !options.statusBar;
-    for (const percent of [25, 50, 75, 100, 125, 150, 175, 200]) {
-      const option = node(this.doc, 'option', '', `${percent}%`);
-      option.value = String(percent);
-      this.zoom.append(option);
-    }
     this.zoom.addEventListener('change', () => renderer.setZoom(Number(this.zoom.value) / 100));
     bottom.append(this.tabs, this.stats, this.zoom);
     this.fileInput = node(this.doc, 'input');
@@ -470,9 +469,7 @@ export class EditorShell {
       const group = node(this.doc, 'div', 'ezg-group');
       const controls = node(this.doc, 'div', 'ezg-controls');
       if (title === 'Home' && name === 'Font') {
-        const font = node(this.doc, 'select');
-        font.setAttribute('aria-label', 'Font family');
-        for (const family of ['Outfit', 'Arial', 'Georgia', 'Times New Roman', 'Courier New', 'Verdana']) font.append(node(this.doc, 'option', '', family));
+        const font = createSelect(this.doc, { label: 'Font family', options: ['Outfit', 'Arial', 'Georgia', 'Times New Roman', 'Courier New', 'Verdana'], popupHost: controls });
         font.dataset.style = 'fontFamily';
         font.addEventListener('change', () => this.style({ fontFamily: font.value }));
         const size = node(this.doc, 'input');
@@ -608,7 +605,7 @@ export class EditorShell {
     panel.showModal();
     queueMicrotask(() => {
       if (this.toolElement === panel && panel.querySelector('header')?.contains(this.doc.activeElement)) {
-        panel.querySelector<HTMLElement>(':scope > :not(header) input:not([type=hidden]), :scope > :not(header) select, :scope > :not(header) textarea, :scope > :not(header) button')?.focus({ preventScroll: true });
+        panel.querySelector<HTMLElement>(':scope > :not(header) input:not([type=hidden]), :scope > :not(header) select, :scope > :not(header) textarea, :scope > :not(header) [role=combobox], :scope > :not(header) button')?.focus({ preventScroll: true });
       }
     });
     this.toolCleanup = () => { if (!this.disposed && opener?.isConnected) opener.focus({ preventScroll: true }); };

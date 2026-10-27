@@ -2,7 +2,8 @@ import { toA1 } from '@ezygrid/model';
 import { formulaRegistry } from '@ezygrid/formula';
 import type { EditorShell } from './editor-shell.js';
 import type { RibbonControls } from './layout-ribbon.js';
-import { node, button } from './dom.js';
+import { node, button, type FormControl } from './dom.js';
+import { createSelect, type SelectControl } from './select.js';
 import { openPanel } from './panels.js';
 import { openObjectPanel } from './object-panel.js';
 import { openTablePanel } from './table-panel.js';
@@ -24,6 +25,7 @@ export function selectedTable(host: EditorShell) {
 export function mountToolsRibbon(host: EditorShell, ribbon: HTMLElement, tab: string): RibbonControls {
   const { doc, renderer } = host;
   const groups: HTMLElement[] = [];
+  const selects: SelectControl[] = [];
   const updates: (() => void)[] = [];
   let closeMenu: (() => void) | undefined;
   let disposed = false;
@@ -61,21 +63,21 @@ export function mountToolsRibbon(host: EditorShell, ribbon: HTMLElement, tab: st
   };
   const pick = (target: HTMLElement, label: string, choices: readonly string[]) => {
     const wrapper = node(doc, 'label', 'ezg-ribbon-field'); wrapper.append(node(doc, 'span', '', label));
-    const input = node(doc, 'select'); input.setAttribute('aria-label', label);
-    for (const choice of choices) input.append(node(doc, 'option', '', choice));
+    const input = createSelect(doc, { label, options: choices, popupHost: host.root });
+    selects.push(input);
     wrapper.append(input); target.append(wrapper); return input;
   };
   const check = (target: HTMLElement, label: string, checked: boolean) => {
     const input = field(target, label, '', 'checkbox'); input.checked = checked; return input;
   };
-  const sync = (input: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement, value: () => string | boolean | number) => {
+  const sync = (input: FormControl, value: () => string | boolean | number) => {
     updates.push(() => {
       if (doc.activeElement === input) return;
       if (input instanceof doc.defaultView!.HTMLInputElement && input.type === 'checkbox') input.checked = Boolean(value());
       else input.value = String(value());
     });
   };
-  const change = (input: HTMLInputElement | HTMLSelectElement, apply: () => void) => input.addEventListener('change', guard(() => {
+  const change = (input: HTMLInputElement | HTMLTextAreaElement | SelectControl, apply: () => void) => input.addEventListener('change', guard(() => {
     if (input.reportValidity()) apply();
   }));
   const menu = (target: HTMLElement, label: string, entries: () => { label: string; action: () => void }[]) => {
@@ -140,10 +142,9 @@ export function mountToolsRibbon(host: EditorShell, ribbon: HTMLElement, tab: st
     const search = field(functions, 'Search functions');
     const choices = pick(functions, 'Function', []);
     const populate = () => {
-      choices.replaceChildren();
-      for (const meta of formulaRegistry.all().filter(fn => `${fn.name} ${fn.description}`.toLowerCase().includes(search.value.toLowerCase()))) {
-        const option = node(doc, 'option', '', meta.name); option.title = meta.description ?? meta.name; choices.append(option);
-      }
+      choices.setOptions(formulaRegistry.all()
+        .filter(fn => `${fn.name} ${fn.description}`.toLowerCase().includes(search.value.toLowerCase()))
+        .map(meta => ({ value: meta.name, title: meta.description ?? meta.name })));
     };
     search.addEventListener('input', populate); populate();
     action(functions, 'Insert function', () => { if (choices.value) renderer.insertFormula(`=${choices.value}(`); });
@@ -290,7 +291,7 @@ export function mountToolsRibbon(host: EditorShell, ribbon: HTMLElement, tab: st
     try { for (const update of updates) update(); } finally { refreshing = false; }
   }
   refresh();
-  return { refresh, destroy() { disposed = true; closeMenu?.(); for (const section of groups) section.remove(); } };
+  return { refresh, destroy() { disposed = true; closeMenu?.(); for (const select of selects) select.destroy(); for (const section of groups) section.remove(); } };
 }
 
 export function openObjectManager(host: EditorShell): void {

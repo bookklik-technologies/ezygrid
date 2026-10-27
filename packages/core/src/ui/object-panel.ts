@@ -1,6 +1,6 @@
 import { parseRange, rectToRange, toA1 } from '@ezygrid/model';
 import type { EditorShell } from './editor-shell.js';
-import { button, form, node, type Field } from './dom.js';
+import { button, form, node, type Field, type FormControl } from './dom.js';
 import { readChartData, sanitizeChartColor, type ChartSpec, type ChartType } from '../charts.js';
 import { renderChartSVG } from '../chart-svg.js';
 import type { ImageMedia, ShapeMedia } from '../media.js';
@@ -34,7 +34,7 @@ export function openObjectPanel(host: EditorShell, kind: FloatingKind, ref?: Flo
   const message = node(doc, 'p', 'ezg-object-error');
   message.setAttribute('role', 'status');
   message.setAttribute('aria-live', 'polite');
-  const fields = new Map<string, HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>();
+  const fields = new Map<string, FormControl>();
   const content = node(doc, 'div', 'ezg-form');
   const advanced = node(doc, 'details', 'ezg-object-advanced');
   advanced.append(node(doc, 'summary', '', 'Advanced'));
@@ -75,7 +75,7 @@ export function openObjectPanel(host: EditorShell, kind: FloatingKind, ref?: Flo
   const add = (field: Field, parent: HTMLElement = content) => {
     const built = form(doc, [field], () => {});
     const wrapper = built.firstElementChild!;
-    const input = wrapper.querySelector<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>('input,select,textarea')!;
+    const input = wrapper.querySelector<FormControl>('input,select,textarea,[role=combobox]')!;
     fields.set(field.key, input);
     parent.append(wrapper);
     return input;
@@ -215,6 +215,7 @@ export function openObjectPanel(host: EditorShell, kind: FloatingKind, ref?: Flo
       if (!imageReady) throw new Error(imageError || 'Choose an image file or enter an HTTPS image URL.');
     }
     for (const input of fields.values()) {
+      if (!(input instanceof doc.defaultView!.HTMLInputElement) && !(input instanceof doc.defaultView!.HTMLTextAreaElement)) continue;
       if (input.type !== 'hidden' && !input.checkValidity()) throw new Error(`${input.getAttribute('aria-label')} needs a valid value.`);
     }
     const anchor = rangeBounds(value('anchor'));

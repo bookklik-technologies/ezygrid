@@ -89,7 +89,7 @@ function openObjectPanel(host, kind, ref, preset) {
     const add = (field, parent = content) => {
         const built = (0, dom_js_1.form)(doc, [field], () => { });
         const wrapper = built.firstElementChild;
-        const input = wrapper.querySelector('input,select,textarea');
+        const input = wrapper.querySelector('input,select,textarea,[role=combobox]');
         fields.set(field.key, input);
         parent.append(wrapper);
         return input;
@@ -281,6 +281,8 @@ function openObjectPanel(host, kind, ref, preset) {
                 throw new Error(imageError || 'Choose an image file or enter an HTTPS image URL.');
         }
         for (const input of fields.values()) {
+            if (!(input instanceof doc.defaultView.HTMLInputElement) && !(input instanceof doc.defaultView.HTMLTextAreaElement))
+                continue;
             if (input.type !== 'hidden' && !input.checkValidity())
                 throw new Error(`${input.getAttribute('aria-label')} needs a valid value.`);
         }

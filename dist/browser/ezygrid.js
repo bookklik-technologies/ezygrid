@@ -331,7 +331,8 @@ exports.startBrowserLoader({
         "@ezygrid/model": "model/index",
         "./workbook.js": "core/workbook",
         "./ui/editor-shell.js": "core/ui/editor-shell",
-        "./ui/cell-style.js": "core/ui/cell-style"
+        "./ui/cell-style.js": "core/ui/cell-style",
+        "./ui/select.js": "core/ui/select"
       }
     },
     "core/selection": {
@@ -379,6 +380,7 @@ exports.startBrowserLoader({
         "../workbook.js": "core/workbook",
         "@ezygrid/model": "model/index",
         "./dom.js": "core/ui/dom",
+        "./select.js": "core/ui/select",
         "./styles.js": "core/ui/styles",
         "./panels.js": "core/ui/panels",
         "./layout-ribbon.js": "core/ui/layout-ribbon",
@@ -392,6 +394,12 @@ exports.startBrowserLoader({
     },
     "core/ui/dom": {
       "file": "modules/core/ui/dom.js",
+      "dependencies": {
+        "./select.js": "core/ui/select"
+      }
+    },
+    "core/ui/select": {
+      "file": "modules/core/ui/select.js",
       "dependencies": {}
     },
     "core/ui/styles": {
@@ -483,6 +491,7 @@ exports.startBrowserLoader({
       "file": "modules/core/ui/headers-ribbon.js",
       "dependencies": {
         "./dom.js": "core/ui/dom",
+        "./select.js": "core/ui/select",
         "./layout-actions.js": "core/ui/layout-actions"
       }
     },
@@ -492,6 +501,7 @@ exports.startBrowserLoader({
         "@ezygrid/model": "model/index",
         "@ezygrid/formula": "formula/index",
         "./dom.js": "core/ui/dom",
+        "./select.js": "core/ui/select",
         "./panels.js": "core/ui/panels",
         "./object-panel.js": "core/ui/object-panel",
         "./table-panel.js": "core/ui/table-panel",
